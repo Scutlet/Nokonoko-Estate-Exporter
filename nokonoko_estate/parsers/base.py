@@ -3,7 +3,7 @@ import logging
 import struct
 from typing import Generic, TypeVar
 
-from nokonoko_estate.formats import HSFData, HSFHeader
+from nokonoko_estate.formats.formats import HSFData, HSFHeader
 
 T = TypeVar("T", bound=HSFData)
 T2 = TypeVar("T", bound=HSFData)

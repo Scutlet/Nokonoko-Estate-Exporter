@@ -1,7 +1,8 @@
 from nokonoko_estate.parsers.file_parser import HSFFileParser
 from nokonoko_estate.serializers.dae.file_serializer import HSFFileDAESerializer
 
-FILENAME = "w05_file24.hsf"
+FILENAME = "resources/w05_file24.hsf"
+# FILENAME = "resources/w05_file0.hsf"
 
 if __name__ == "__main__":
     parser = HSFFileParser(FILENAME)

@@ -2,7 +2,8 @@ from copy import deepcopy
 import io
 import logging
 
-from nokonoko_estate.formats import (
+from nokonoko_estate.formats.enums import GCNPaletteFormats, GCNTextureFormats
+from nokonoko_estate.formats.formats import (
     AttributeHeader,
     HSFData,
     HSFFile,
@@ -10,7 +11,9 @@ from nokonoko_estate.formats import (
     MaterialObject,
     MeshObject,
     BoneObject,
+    PaletteInfo,
     PrimitiveObject,
+    TextureInfo,
     Vertex,
 )
 from nokonoko_estate.parsers.base import HSFParserBase
@@ -19,9 +22,11 @@ from nokonoko_estate.parsers.parsers import (
     HSFHeaderParser,
     Material1ObjectParser,
     MaterialObjectParser,
+    PaletteInfoParser,
     TextureInfoParser,
     VertexParser,
 )
+from nokonoko_estate.parsers.textures import BitMapImage, get_texture_byte_size
 
 logger = logging.Logger(__name__)
 
@@ -34,7 +39,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self.filepath = filepath
 
         self._mesh_objects: dict[str, MeshObject] = {}
-        self._textures: list = []  # GenericTexture
+        self._textures: list = [BitMapImage]
         self._bones: list[BoneObject] = []
         self._materials_1: list[Material1Object] = []
         self._materials: list[MaterialObject] = []
@@ -258,6 +263,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             print(f"Parsed {len(positions)} (vertex) positions for mesh {name}")
 
     def _parse_normals(self, headers: list[AttributeHeader]):
+        """TODO"""
+        return
         start_ofs = self._fl.tell()
         flag = 0
         if len(headers) >= 2:
@@ -342,100 +349,77 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         """TODO"""
         tex_len = self._header.texture.length
         pal_ofs = self._header.palette.offset
-        pal_ofs = self._header.palette.length
+        pal_len = self._header.palette.length
 
-        tex_info = self._parse_array(TextureInfoParser, tex_len)
-        ofs = self._fl.tell()
-        print(f"Identified {tex_len} texture(s). DID NOT PARSE!")
-        # TODO
+        tex_infos: list[TextureInfo] = self._parse_array(TextureInfoParser, tex_len)
+        ofs_post_tex = self._fl.tell()
+        print(f"Identified {tex_len} texture(s)")
 
-        # reader.Position = offset;
-        # var texInfo = reader.ReadStructArray<TextureInfo>(count);
-        # var startOffset = reader.Position;
+        self._fl.seek(pal_ofs, io.SEEK_SET)
+        pal_infos: list[PaletteInfo] = self._parse_array(PaletteInfoParser, pal_len)
+        ofs_post_pal = self._fl.tell()
 
-        # reader.Position = paletteOffset;
-        # var palInfo = reader.ReadStructArray<PaletteInfo>(paletteCount);
-        # var palSectionOffset = reader.Position;
+        for tex_info in tex_infos:
+            tex_name = self._parse_from_stringtable(tex_info.name_offset, -1)
+            print(f"> Identified texture {tex_name} ({tex_info.tex_format})")
 
-        # for(int i = 0; i < texInfo.Length; i++)
-        # {
-        #     var textureName = reader.ReadString(stringTableOffset + texInfo[i].NameOffset, -1);
-        #     Console.WriteLine($"{textureName} {texInfo[i].Type1} {texInfo[i].Type2} {texInfo[i].PaletteIndex} {texInfo[i].Width} {texInfo[i].Height} {(startOffset + texInfo[i].DataOffset).ToString("X")}");
+            format: GCNTextureFormats = None
+            pal_data: bytes = bytes([tex_info.palette_entries * 2])
+            pal_format: GCNPaletteFormats = None
+            pal_count = 0
 
-        #     var format = texInfo[i].Type1;
+            match tex_info.tex_format:
+                case 0x00 | 0x01 | 0x02 | 0x03 | 0x04 | 0x05 | 0x06:
+                    format = GCNTextureFormats(tex_info.tex_format)
+                case 0x07:
+                    format = GCNTextureFormats.CMPR
+                case 0x09 | 0x0A | 0x0B:
+                    format = GCNTextureFormats.C8
+                case _:
+                    raise NotImplementedError(
+                        f"Invalid tex_format found: {tex_info.tex_format}"
+                    )
 
-        #     byte[] palData = new byte[texInfo[i].Depth * 2];
-        #     var palFormat = 0;
-        #     var palCount = 0;
+            if format == GCNTextureFormats.C8 and tex_info.bpp == 4:
+                format = GCNTextureFormats.C4
 
-        #     switch (texInfo[i].Type1)
-        #     {
-        #         case 0x00:
-        #             format = 0;
-        #             break;
-        #         case 0x01:
-        #             format = 1;
-        #             break;
-        #         case 0x03:
-        #             format = 3;
-        #             break;
-        #         case 0x04:
-        #             format = 4;
-        #             break;
-        #         case 0x05:
-        #             format = 5;
-        #             break;
-        #         case 0x06:
-        #             format = 6;
-        #             break;
-        #         case 0x07:
-        #             format = 14;
-        #             break;
-        #         case 0x09:
-        #             palFormat = 1;
-        #             format = 9;
-        #             if (texInfo[i].Type2 == 4)
-        #                 format = 8;
-        #             break;
-        #         case 0x0A:
-        #             palFormat = 2;
-        #             format = 9;
-        #             if (texInfo[i].Type2 == 4)
-        #                 format = 8;
-        #             break;
-        #         case 0x0B:
-        #             palFormat = 1;
-        #             format = 9;
-        #             if (texInfo[i].Type2 == 4)
-        #                 format = 8;
-        #             break;
-        #         default:
-        #             throw new NotSupportedException("Unsupported Texture Type " + texInfo[i].Type1 + " " + texInfo[i].Type2);
-        #     }
+            print("bpp")
+            print(tex_info.bpp)
+            print(format)
+            match tex_info.tex_format:
+                case 0x00:
+                    pass
+                case 0x09:
+                    pal_format = GCNPaletteFormats.RGB565
+                case 0x0A:
+                    pal_format = GCNPaletteFormats.RGB5A3
+                case 0x0B:
+                    pal_format = GCNPaletteFormats.IA8
 
-        #     //var pal = palInfo.ToList().Find(e => e.NameOffset == texInfo[i].NameOffset);
-        #     if (texInfo[i].PaletteIndex > -1)
-        #     {
-        #         var pal = palInfo[texInfo[i].PaletteIndex];
-        #         palCount = pal.Count;
-        #         palData = reader.GetSection(palSectionOffset + pal.DataOffset, 2 * palCount);
-        #         Console.WriteLine((palSectionOffset + pal.DataOffset).ToString("X") + " " + (2 * palCount).ToString("X"));
-        #     }
+            if tex_info.palette_index >= 0:
+                pal_info = pal_infos[tex_info.palette_index]
+                pal_count = pal_info.count
 
-        #     var dataLength =
-        #         Tools.TPL.textureByteSize((Tools.TPL_TextureFormat)format, texInfo[i].Width, texInfo[i].Height);
-        #     ;
-        #     Console.WriteLine(textureName + " " + (Tools.TPL_TextureFormat)format + " " + dataLength.ToString("X"));
-        #     reader.Position = startOffset + texInfo[i].DataOffset;
+                prev_ofs = self._fl.tell()
+                self._fl.seek(pal_ofs + pal_info.data_offset, io.SEEK_SET)
+                pal_data = self._fl.read(2 * pal_count)
+                self._fl.seek(prev_ofs, io.SEEK_SET)
 
-        #     var bitmap = Tools.TPL.ConvertFromTextureMelee(reader.ReadBytes(dataLength), texInfo[i].Width, texInfo[i].Height, format, palData, palCount, palFormat);//.Save(textureName + ".png");
+            data_sz = get_texture_byte_size(format, tex_info.width, tex_info.height)
+            self._fl.seek(ofs_post_tex + tex_info.data_offset, io.SEEK_SET)
+            data = self._fl.read(data_sz)
+            print(f"{data_sz:#x}")
 
-        #     GenericTexture t = new GenericTexture();
-        #     t.Name = textureName;
-        #     t.FromBitmap(bitmap);
-        #     bitmap.Dispose();
-        #     Textures.Add(t);
-        # }
+            bitmap = BitMapImage.convert_from_texture(
+                data,
+                tex_info.width,
+                tex_info.height,
+                format,
+                pal_data,
+                pal_count,
+                pal_format,
+            )
+            self._textures.append(bitmap)
 
     def _parse_bones(self):
         """TODO"""

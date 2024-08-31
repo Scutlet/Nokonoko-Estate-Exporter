@@ -245,18 +245,19 @@ class Material1Object(HSFData):  # struct
 class TextureInfo(HSFData):
     """TODO
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
+    See: https://github.com/KillzXGaming/MPLibrary/blob/master/MPLibrary/GCWii/HSF/Sections/Texture/TextureSection.cs
     """
 
     name_offset: int  # uint
-    padding: int  # uint
-    type_1: int  # byte
-    type_2: int  # byte
+    max_lod: int  # uint
+    tex_format: int  # byte
+    bpp: int  # byte; to determine pallete types CI4/CI8
     width: int  # ushort
     height: int  # ushort
-    depth: int  # ushort
-    padding_1: int  # uint; usually 0
+    palette_entries: int  # ushort
+    texture_tint: int  # uint; Used for grayscale (I4, I8) types. Color blends with tev stages as color
     palette_index: int  # -1, usually except for paletted?
-    padding_3: int  # uint; usually 0
+    padding: int  # uint; usually 0
     data_offset: int  # uint
 
 

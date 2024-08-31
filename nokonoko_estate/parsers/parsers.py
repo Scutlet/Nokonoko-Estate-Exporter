@@ -1,10 +1,11 @@
 import io
 
-from nokonoko_estate.formats import (
+from nokonoko_estate.formats.formats import (
     AttributeHeader,
     HSFHeader,
     Material1Object,
     MaterialObject,
+    PaletteInfo,
     TextureInfo,
     Vertex,
 )
@@ -106,4 +107,11 @@ class TextureInfoParser(HSFParserBase[TextureInfo]):
     """TODO"""
 
     _data_type = TextureInfo
-    struct_formatting = ">IIccHHHIiII"
+    struct_formatting = ">IIBBHHHIiII"
+
+
+class PaletteInfoParser(HSFParserBase[PaletteInfo]):
+    """TODO"""
+
+    _data_type = PaletteInfo
+    struct_formatting = ">IiiI"

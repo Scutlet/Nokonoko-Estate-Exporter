@@ -1,7 +1,7 @@
 import logging
 import xml.etree.ElementTree as ET
 
-from nokonoko_estate.formats import HSFFile, MeshObject, PrimitiveObject
+from nokonoko_estate.formats.formats import HSFFile, MeshObject, PrimitiveObject
 
 
 logger = logging.Logger(__name__)
@@ -73,17 +73,9 @@ class HSFFileDAESerializer:
         )
         mesh = ET.SubElement(geometry, "mesh")
         mesh.append(self.serialize_positions(mesh_obj))
-        # mesh.append(
-        #     self.serialize_vertex_data_array(
-        #         mesh_obj.normals, f"{mesh_obj.name}-normal"
-        #     )
-        # )
-        # mesh.append(
-        #     self.serialize_vertex_data_array(mesh_obj.uvs, f"{mesh_obj.name}-textcoord")
-        # )
-        # mesh.append(
-        #     self.serialize_vertex_data_array(mesh_obj.colors, f"{mesh_obj.name}-color")
-        # )
+        # NORMALS
+        mesh.append(self.serialize_uvs(mesh_obj))
+        # COLORS
 
         vertices = ET.SubElement(mesh, "vertices", id=f"{mesh_obj.name}-vertex")
         ET.SubElement(
@@ -94,20 +86,10 @@ class HSFFileDAESerializer:
         polygons = ET.SubElement(mesh, "polylist", count="1")  # material=foo
         triangles = ET.SubElement(mesh, "triangles", count="1")  # material=foo
 
-        input_vertex_tri = ET.SubElement(
-            triangles,
-            "input",
-            semantic="VERTEX",
-            source=f"#{mesh_obj.name}-vertex",
-            offset="0",
-        )
-        input_vertex_poly = ET.SubElement(
-            polygons,
-            "input",
-            semantic="VERTEX",
-            source=f"#{mesh_obj.name}-vertex",
-            offset="0",
-        )
+        for poly in self._serialize_inputs(mesh_obj):
+            polygons.append(poly)
+            triangles.append(poly)
+
         vcount_poly = ET.SubElement(polygons, "vcount")
         p_tri = ET.SubElement(triangles, "p")
         p_poly = ET.SubElement(polygons, "p")
@@ -144,12 +126,34 @@ class HSFFileDAESerializer:
 
         return geometry
 
+    def _serialize_inputs(self, mesh_obj: MeshObject) -> list[ET.Element]:
+        """TODO"""
+        return [
+            ET.Element(
+                "input",
+                semantic="VERTEX",
+                source=f"#{mesh_obj.name}-vertex",
+                offset="0",
+            ),
+            # TODO: NORMAL
+            ET.Element(
+                "input",
+                semantic="TEXCOORD",
+                source=f"#{mesh_obj.name}-texcoord",
+                offset="1",  # 2
+            ),
+            # TODO: COLOR
+        ]
+
     def serialize_primitive_triangle(self, primitive: PrimitiveObject) -> list[str]:
         """TODO"""
         assert (
             primitive.primitive_type == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE
         )
-        raise NotImplementedError("Cannot serialize triangles")
+        # print([vertex.position_index for vertex in primitive.vertices])
+        # print([str(vertex.position_index) for vertex in primitive.vertices[:3]])
+        # raise NotImplementedError("Cannot serialize triangles")
+        return [str(vertex.position_index) for vertex in primitive.vertices[:3]]
 
     def serialize_primitive_quad(self, primitive: PrimitiveObject) -> list[str]:
         """TODO"""
@@ -158,12 +162,17 @@ class HSFFileDAESerializer:
         # Order in HSF-file: 0 1 3 2
         return [
             str(primitive.vertices[0].position_index),
+            str(primitive.vertices[0].uv_index),
             str(primitive.vertices[1].position_index),
+            str(primitive.vertices[1].uv_index),
             str(primitive.vertices[3].position_index),
+            str(primitive.vertices[3].uv_index),
             str(primitive.vertices[2].position_index),
+            str(primitive.vertices[2].uv_index),
         ]
 
     def serialize_positions(self, mesh_obj: MeshObject) -> ET.Element:
+        """TODO"""
         source = self.serialize_vertex_data_array(
             mesh_obj.positions, f"{mesh_obj.name}-position"
         )
@@ -178,6 +187,25 @@ class HSFFileDAESerializer:
         ET.SubElement(accessor, "param", name="X", type="float")
         ET.SubElement(accessor, "param", name="Y", type="float")
         ET.SubElement(accessor, "param", name="Z", type="float")
+        return source
+
+    def serialize_uvs(self, mesh_obj: MeshObject) -> ET.Element:
+        """TODO"""
+        source = self.serialize_vertex_data_array(
+            # COLLADA assumes (1.0, 0.0) is the top-left corner; HSF assumes that's bottom-left
+            list(map(lambda st: (st[0], 1 - st[1]), mesh_obj.uvs)),
+            f"{mesh_obj.name}-texcoord",
+        )
+        technique = ET.SubElement(source, "technique_common")
+        accessor = ET.SubElement(
+            technique,
+            "accessor",
+            source=f"#{mesh_obj.name}-texcoord-array",
+            count=str(len(mesh_obj.uvs)),
+            stride="2",
+        )
+        ET.SubElement(accessor, "param", name="S", type="float")
+        ET.SubElement(accessor, "param", name="T", type="float")
         return source
 
     def serialize_vertex_data_array(
