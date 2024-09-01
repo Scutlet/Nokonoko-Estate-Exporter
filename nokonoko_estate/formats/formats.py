@@ -4,6 +4,8 @@ from io import BufferedReader
 import struct
 from typing import ClassVar, Self
 
+from PIL import Image
+
 # See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
 
 
@@ -24,7 +26,7 @@ class HSFFile:
     """HSF File"""
 
     mesh_objects: dict[str, "MeshObject"] = field(default_factory=dict)
-    textures: list = field(default_factory=list)  # GenericTexture
+    textures: list[tuple[str, Image.Image]] = field(default_factory=list)
     bones: list["BoneObject"] = field(default_factory=list)
     materials_1: list["Material1Object"] = field(default_factory=list)
     materials: list["MaterialObject"] = field(default_factory=list)
@@ -35,19 +37,31 @@ class HSFHeader:
     """HSF Header"""
 
     magic: str
-    size: int = -1
-    flag: int = -1
-    material_1s: HSFTable = field(default_factory=HSFTable)
+    fogs: HSFTable = field(default_factory=HSFTable)
+    colors: HSFTable = field(default_factory=HSFTable)
     materials: HSFTable = field(default_factory=HSFTable)
+    attributes: HSFTable = field(default_factory=HSFTable)
     positions: HSFTable = field(default_factory=HSFTable)
     normals: HSFTable = field(default_factory=HSFTable)
     uvs: HSFTable = field(default_factory=HSFTable)
     primitives: HSFTable = field(default_factory=HSFTable)
     bones: HSFTable = field(default_factory=HSFTable)
-    texture: HSFTable = field(default_factory=HSFTable)
-    palette: HSFTable = field(default_factory=HSFTable)
-    rig: HSFTable = field(default_factory=HSFTable)
+    textures: HSFTable = field(default_factory=HSFTable)
+    palettes: HSFTable = field(default_factory=HSFTable)
+    motions: HSFTable = field(default_factory=HSFTable)
+    rigs: HSFTable = field(default_factory=HSFTable)
+    skeletons: HSFTable = field(default_factory=HSFTable)
+
+    # Unused data
+    parts: HSFTable = field(default_factory=HSFTable)
+    clusters: HSFTable = field(default_factory=HSFTable)
+    shapes: HSFTable = field(default_factory=HSFTable)
+    map_attributes: HSFTable = field(default_factory=HSFTable)
+    # end
+
     stringtable: HSFTable = field(default_factory=HSFTable)
+    matrices: HSFTable = field(default_factory=HSFTable)
+    symbols: HSFTable = field(default_factory=HSFTable)
 
 
 @dataclass

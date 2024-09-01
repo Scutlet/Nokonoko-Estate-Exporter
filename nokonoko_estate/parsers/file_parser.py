@@ -2,7 +2,9 @@ from copy import deepcopy
 import io
 import logging
 
-from nokonoko_estate.formats.enums import GCNPaletteFormats, GCNTextureFormats
+from PIL import Image
+
+from nokonoko_estate.formats.enums import GCNPaletteFormat, GCNTextureFormat
 from nokonoko_estate.formats.formats import (
     AttributeHeader,
     HSFData,
@@ -39,7 +41,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self.filepath = filepath
 
         self._mesh_objects: dict[str, MeshObject] = {}
-        self._textures: list = [BitMapImage]
+        self._textures: list[tuple[str, Image.Image]] = []
         self._bones: list[BoneObject] = []
         self._materials_1: list[Material1Object] = []
         self._materials: list[MaterialObject] = []
@@ -73,16 +75,16 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._parse_primitives(primitive_headers)
 
         # Materials
-        self._fl.seek(self._header.materials.offset, io.SEEK_SET)
+        self._fl.seek(self._header.attributes.offset, io.SEEK_SET)
         self._materials = self._parse_array(
-            MaterialObjectParser, self._header.materials.length
+            MaterialObjectParser, self._header.attributes.length
         )
         print(f"{len(self._materials)} materials identified!")
 
         # Materials 1
-        self._fl.seek(self._header.material_1s.offset, io.SEEK_SET)
+        self._fl.seek(self._header.materials.offset, io.SEEK_SET)
         self._materials = self._parse_array(
-            Material1ObjectParser, self._header.material_1s.length
+            Material1ObjectParser, self._header.materials.length
         )
         print(f"{len(self._materials_1)} material_1s identified!")
 
@@ -106,7 +108,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._parse_uvs(uv_headers)
 
         # Textures
-        self._fl.seek(self._header.texture.offset, io.SEEK_SET)
+        self._fl.seek(self._header.textures.offset, io.SEEK_SET)
         self._parse_textures()
 
         # Bones
@@ -114,11 +116,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._parse_bones()
 
         # ???
-        end_ofs = self._header.rig.offset + self._header.rig.length * 0x24
-        self._fl.seek(self._header.rig.offset)
+        end_ofs = self._header.rigs.offset + self._header.rigs.length * 0x24
+        self._fl.seek(self._header.rigs.offset)
 
         meshnames = list(self._mesh_objects.keys())
-        for i in range(self._header.rig.length):
+        for i in range(self._header.rigs.length):
             mesh_obj = self._mesh_objects[meshnames[i]]
             raise NotImplementedError("Rigging not implemented")
 
@@ -198,7 +200,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             mesh_obj = MeshObject(prim_name)
             self._mesh_objects[prim_name] = mesh_obj
             meshobj_index += 1
-            print(f"{mesh_obj.name} contains {attr.data_count} primitive(s)")
+            # print(f"{mesh_obj.name} contains {attr.data_count} primitive(s)")
 
             self._fl.seek(ofs + attr.data_offset)
             for i in range(attr.data_count):
@@ -260,7 +262,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 )
                 self._mesh_objects[name] = MeshObject(name)
             self._mesh_objects[name].positions += positions
-            print(f"Parsed {len(positions)} (vertex) positions for mesh {name}")
+            # print(f"Parsed {len(positions)} (vertex) positions for mesh {name}")
 
     def _parse_normals(self, headers: list[AttributeHeader]):
         """TODO"""
@@ -321,35 +323,13 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 )
                 self._mesh_objects[name] = MeshObject(name)
             self._mesh_objects[name].uvs += uv_coords
-            print(f"Parsed {len(uv_coords)} (vertex) UV's for mesh {name}")
-
-        # var startingOffset = reader.Position;
-        # int index = 0;
-        # foreach (var att in headers)
-        # {
-        #     reader.Position = startingOffset + att.DataOffset;
-
-        #     var posList = new List<Vector2>();
-        #     for (int i = 0; i < att.DataCount; i++)
-        #     {
-        #         posList.Add(new Vector2(reader.ReadSingle(), reader.ReadSingle()));
-        #     }
-        #     var name = reader.ReadString(stringTableOffset + att.StringOffset, -1);
-
-        #     if (MeshObjects.ContainsKey(name))
-        #     {
-        #         MeshObjects[name].UVs.AddRange(posList);
-        #         index++;
-        #     }
-
-        #     //Console.WriteLine(reader.ReadString(stringTableOffset + att.StringOffset, -1) + " " + (startingOffset + att.DataOffset).ToString("X") + " " +  reader.Position.ToString("X"));
-        # }
+            # print(f"Parsed {len(uv_coords)} (vertex) UV's for mesh {name}")
 
     def _parse_textures(self):
         """TODO"""
-        tex_len = self._header.texture.length
-        pal_ofs = self._header.palette.offset
-        pal_len = self._header.palette.length
+        tex_len = self._header.textures.length
+        pal_ofs = self._header.palettes.offset
+        pal_len = self._header.palettes.length
 
         tex_infos: list[TextureInfo] = self._parse_array(TextureInfoParser, tex_len)
         ofs_post_tex = self._fl.tell()
@@ -358,68 +338,68 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._fl.seek(pal_ofs, io.SEEK_SET)
         pal_infos: list[PaletteInfo] = self._parse_array(PaletteInfoParser, pal_len)
         ofs_post_pal = self._fl.tell()
+        print(f"Identified {pal_len} palette(s)")
+        # print(
+        #     "\n".join(
+        #         [
+        #             str(x) + self._parse_from_stringtable(x.name_offset)
+        #             for x in pal_infos
+        #         ]
+        #     )
+        # )
 
         for tex_info in tex_infos:
             tex_name = self._parse_from_stringtable(tex_info.name_offset, -1)
             print(f"> Identified texture {tex_name} ({tex_info.tex_format})")
 
-            format: GCNTextureFormats = None
-            pal_data: bytes = bytes([tex_info.palette_entries * 2])
-            pal_format: GCNPaletteFormats = None
-            pal_count = 0
-
+            format: GCNTextureFormat = None
             match tex_info.tex_format:
                 case 0x00 | 0x01 | 0x02 | 0x03 | 0x04 | 0x05 | 0x06:
-                    format = GCNTextureFormats(tex_info.tex_format)
+                    format = GCNTextureFormat(tex_info.tex_format)
                 case 0x07:
-                    format = GCNTextureFormats.CMPR
+                    format = GCNTextureFormat.CMPR
                 case 0x09 | 0x0A | 0x0B:
-                    format = GCNTextureFormats.C8
+                    format = GCNTextureFormat.C8
                 case _:
                     raise NotImplementedError(
                         f"Invalid tex_format found: {tex_info.tex_format}"
                     )
+            if format == GCNTextureFormat.C8 and tex_info.bpp == 4:
+                format = GCNTextureFormat.C4
 
-            if format == GCNTextureFormats.C8 and tex_info.bpp == 4:
-                format = GCNTextureFormats.C4
-
-            print("bpp")
-            print(tex_info.bpp)
-            print(format)
+            pal_data: bytes = bytes()
+            pal_format: GCNPaletteFormat | None = None
             match tex_info.tex_format:
                 case 0x00:
+                    # No palette
                     pass
                 case 0x09:
-                    pal_format = GCNPaletteFormats.RGB565
+                    pal_format = GCNPaletteFormat.RGB565
                 case 0x0A:
-                    pal_format = GCNPaletteFormats.RGB5A3
+                    pal_format = GCNPaletteFormat.RGB5A3
                 case 0x0B:
-                    pal_format = GCNPaletteFormats.IA8
+                    pal_format = GCNPaletteFormat.IA8
 
             if tex_info.palette_index >= 0:
                 pal_info = pal_infos[tex_info.palette_index]
-                pal_count = pal_info.count
-
                 prev_ofs = self._fl.tell()
-                self._fl.seek(pal_ofs + pal_info.data_offset, io.SEEK_SET)
-                pal_data = self._fl.read(2 * pal_count)
+                self._fl.seek(ofs_post_pal + pal_info.data_offset, io.SEEK_SET)
+                pal_data = self._fl.read(2 * pal_info.count)
                 self._fl.seek(prev_ofs, io.SEEK_SET)
 
             data_sz = get_texture_byte_size(format, tex_info.width, tex_info.height)
             self._fl.seek(ofs_post_tex + tex_info.data_offset, io.SEEK_SET)
             data = self._fl.read(data_sz)
-            print(f"{data_sz:#x}")
 
             bitmap = BitMapImage.convert_from_texture(
-                data,
-                tex_info.width,
-                tex_info.height,
-                format,
-                pal_data,
-                pal_count,
-                pal_format,
+                data, tex_info.width, tex_info.height, format, pal_data, pal_format
             )
-            self._textures.append(bitmap)
+            # if "kanban" in tex_name:
+            #     bitmap.show()
+            #     exit(0)
+
+            if bitmap is not None:
+                self._textures.append((tex_name, bitmap))
 
     def _parse_bones(self):
         """TODO"""

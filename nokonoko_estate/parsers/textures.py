@@ -1,43 +1,43 @@
 from dataclasses import dataclass
-from io import BytesIO
-from typing import Self
-from nokonoko_estate.formats.enums import GCNPaletteFormats, GCNTextureFormats
+from io import SEEK_CUR, BytesIO
+from typing import Callable, Self
+from nokonoko_estate.formats.enums import GCNPaletteFormat, GCNTextureFormat
 
 from PIL import Image
 
 
-def add_padding(value: int, padding: int):
-    """TODO
+def round_up_to_multiple(value: int, multiple: int):
+    """
+    Rounds `value` up to the nearest multiple of `multiple`
+
     See: https://github.com/TheShadowEevee/libWiiSharp/blob/master/Shared.cs
     """
-    if value % padding != 0:
-        value += padding - value % padding
+    if value % multiple != 0:
+        value += multiple - value % multiple
     return value
 
 
-def get_texture_byte_size(format: GCNTextureFormats, width: int, height: int) -> int:
+def get_texture_byte_size(format: GCNTextureFormat, width: int, height: int) -> int:
     """TODO
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Tools/TLP.cs
     """
     match format:
-        case GCNTextureFormats.I4:
-            return add_padding(width, 8) * add_padding(height, 8) / 2
-        case GCNTextureFormats.I8 | GCNTextureFormats.IA4:
-            return add_padding(width, 8) * add_padding(height, 4)
-        case (
-            GCNTextureFormats.IA8 | GCNTextureFormats.RGB565 | GCNTextureFormats.RGB5A3
-        ):
-            return add_padding(width, 4) * add_padding(height, 4) * 2
-        case GCNTextureFormats.RGBA32:
-            return add_padding(width, 4) * add_padding(height, 4) * 4
-        case GCNTextureFormats.C4:
-            return add_padding(width, 8) * add_padding(height, 8) / 2
-        case GCNTextureFormats.C8:
-            return add_padding(width, 8) * add_padding(height, 4)
-        case GCNTextureFormats.C14X2:
-            return add_padding(width, 4) * add_padding(height, 4) * 2
-        case GCNTextureFormats.CMPR:
-            return add_padding(width, 8) * add_padding(height, 8) / 2
+        case GCNTextureFormat.I4:
+            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 8) // 2
+        case GCNTextureFormat.I8 | GCNTextureFormat.IA4:
+            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 4)
+        case GCNTextureFormat.IA8 | GCNTextureFormat.RGB565 | GCNTextureFormat.RGB5A3:
+            return round_up_to_multiple(width, 4) * round_up_to_multiple(height, 4) * 2
+        case GCNTextureFormat.RGBA32:
+            return round_up_to_multiple(width, 4) * round_up_to_multiple(height, 4) * 4
+        case GCNTextureFormat.C4:
+            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 8) // 2
+        case GCNTextureFormat.C8:
+            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 4)
+        case GCNTextureFormat.C14X2:
+            return round_up_to_multiple(width, 4) * round_up_to_multiple(height, 4) * 2
+        case GCNTextureFormat.CMPR:
+            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 8) // 2
         case _:
             raise NotImplementedError(f"Invalid GCNTextureFormat {format}")
 
@@ -51,91 +51,47 @@ class BitMapImage:
         data: bytes,
         width: int,
         height: int,
-        format: GCNTextureFormats,
+        format: GCNTextureFormat,
         palette_data: bytes,
-        palette_count: int,
-        palette_format: GCNPaletteFormats,
-    ) -> Self:
+        palette_format: GCNPaletteFormat | None,
+    ) -> Image.Image:
         """TODO"""
         img = TPLImage()
-        pal_rgba: list[int] = []
-        rgba: bytes = None
+        rgba: list[int] = []
+        palette_pixels: list[int] = []
 
-        # if palette_data:
-        #     # print(palette_data)
-        #     header = TPLImage.PaletteHeader(palette_count, palette_format=format)
-        #     pal_rgba = img.palette_to_rgba(header, palette_data)
-        #     print(pal_rgba)
+        if palette_format is not None:
+            # Parse Palette
+            print(f"Palette format {palette_format.name}")
+            pallete_pixels = img.palette_to_rgba(palette_data, palette_format)
 
         match format:
-            case GCNTextureFormats.I4:
+            case GCNTextureFormat.I4:
                 raise NotImplementedError("I4 not implemented")
-            case GCNTextureFormats.I8:
-                raise NotImplementedError("I8 not implemented")
-            case GCNTextureFormats.IA4:
+            case GCNTextureFormat.I8:
+                rgba = img.from_i8(data, width, height)
+            case GCNTextureFormat.IA4:
                 raise NotImplementedError("IA4 not implemented")
-            case GCNTextureFormats.IA8:
+            case GCNTextureFormat.IA8:
                 raise NotImplementedError("IA8 not implemented")
-            case GCNTextureFormats.RGB565:
-                raise NotImplementedError("RGB565 not implemented")
-            case GCNTextureFormats.RGB5A3:
+            case GCNTextureFormat.RGB565:
+                rgba = img.from_rgb565(data, width, height)
+            case GCNTextureFormat.RGB5A3:
                 rgba = img.from_rgb5a3(data, width, height)
-                raise NotImplementedError("RGB5A3 not implemented")
-            case GCNTextureFormats.RGBA32:
+            case GCNTextureFormat.RGBA32:
                 raise NotImplementedError("RGBA32 not implemented")
-            case GCNTextureFormats.C4:
+            case GCNTextureFormat.C4:
+                rgba = img.from_c4(data, width, height, pallete_pixels)
                 raise NotImplementedError("C4 not implemented")
-            case GCNTextureFormats.C8:
-                raise NotImplementedError("C8 not implemented")
-            case GCNTextureFormats.CMPR:
-                raise NotImplementedError("CMPR not implemented")
+            case GCNTextureFormat.C8:
+                rgba = img.from_c8(data, width, height, pallete_pixels)
+            case GCNTextureFormat.CMPR:
+                rgba = img.from_cmpr(data, width, height)
+                # raise NotImplementedError("CMPR not implemented")
+            case _:
+                # TODO: Error
+                pass
         return img.rgba_to_image(rgba, width, height)
-
-        # switch (format)
-        # {
-        #     case TPL_TextureFormat.I4:
-        #         rgba = tmpTpl.fromI4(imageData, width, height);
-        #         break;
-        #     case TPL_TextureFormat.I8:
-        #         rgba = tmpTpl.fromI8(imageData, width, height);
-        #         break;
-        #     case TPL_TextureFormat.IA4:
-        #         rgba = tmpTpl.fromIA4(imageData, width, height);
-        #         break;
-        #     case TPL_TextureFormat.IA8:
-        #         rgba = tmpTpl.fromIA8(imageData, width, height);
-        #         break;
-        #     case TPL_TextureFormat.RGB565:
-        #         rgba = tmpTpl.fromRGB565(imageData, width, height);
-        #         break;
-        #     case TPL_TextureFormat.RGB5A3:
-        #         rgba = tmpTpl.fromRGB5A3(imageData, width, height);
-        #         break;
-        #     case TPL_TextureFormat.RGBA8:
-        #         rgba = tmpTpl.fromRGBA8(imageData, width, height);
-        #         break;
-        #     case TPL_TextureFormat.CI4:
-        #         rgba = new byte[0];
-        #         rgba = tmpTpl.fromCI4(imageData, paletteDataRgba, width, height);
-        #         break;
-        #     case TPL_TextureFormat.CI8:
-        #         rgba = new byte[0];
-        #         rgba = tmpTpl.fromCI8(imageData, paletteDataRgba, width, height);
-        #         break;
-        #     case TPL_TextureFormat.CI14X2:
-        #         rgba = new byte[0];
-        #         rgba = tmpTpl.fromCI14X2(imageData, paletteDataRgba, width, height);
-        #         break;
-        #     case TPL_TextureFormat.CMP:
-        #         rgba = tmpTpl.fromCMP(imageData, width, height);
-        #         break;
-        #     default:
-        #         rgba = new byte[0];
-        #         break;
-        # }
-
-        # output = tmpTpl.rgbaToImage(rgba, width, height);
-        # return output;
 
 
 class TPLImage:
@@ -143,169 +99,233 @@ class TPLImage:
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Tools/TLP.cs
     """
 
-    @dataclass
-    class PaletteHeader:
+    def _average_rgb565_colors(self, c0: int, c1: int, weight_0=1, weight_1=1) -> int:
+        """Computes a new RGB565-color by averaging each RGB565-color component according to:
+        `(c0 * weight_0 + c1 * weight_1) / (weight_0 + weight_1)`
+        """
+        # Average R
+        r0 = c0 >> 11 & 0x1F
+        r1 = c1 >> 11 & 0x1F
+        cr = (weight_0 * r0 + weight_1 * r1) // (weight_0 + weight_1)
+        # print(r0, r1, cr, cr & 0xFFFF)
+
+        # Average G
+        g0 = c0 >> 5 & 0x3F
+        g1 = c1 >> 5 & 0x3F
+        cg = (weight_0 * g0 + weight_1 * g1) // (weight_0 + weight_1)
+        # print(f"({weight_0} * {g0} + {weight_1} * {g1}) // ({weight_0 + weight_1})")
+        # print(g0, g1, cg * 0x4, cg & 0xFFFF)
+        # print(weight_0, weight_1)
+        # exit(0)
+
+        # Average B
+        b0 = c0 >> 0 & 0x1F
+        b1 = c1 >> 0 & 0x1F
+        cb = (weight_0 * b0 + weight_1 * b1) // (weight_0 + weight_1)
+        # print(b0, b1, cb, cb & 0xFFFF)
+        return cr << 11 | cg << 5 | cb << 0
+
+    def _from_gcn_encoding(
+        self,
+        data: bytes,
+        pixel_fn: Callable[[int, list[int]], int],
+        size: tuple[int, int],
+        bpp: int,
+        block_size: tuple[int, int],
+        palette: list[int] | None = None,
+    ) -> list[int]:
         """TODO"""
-
-        num_items: int = 0  # short
-        unpacked: int = 0  # byte
-        palette_format: GCNPaletteFormats = GCNPaletteFormats.IA8  # uint
-        data_ofs: int = -1  # uint
-
-    def palette_to_rgba(self, header: PaletteHeader, data: bytes) -> bytes:
-        """TODO"""
-        palette_format: GCNPaletteFormats = header.palette_format
-        r = g = b = a = 0
-
-        output: list[int] = []
-
-        # print(header)
-
-        for i in range(header.num_items):
-            pixel = bytes((data[i * 2 + 1], data[i * 2]))
-            pixel = int.from_bytes(pixel, signed=False)
-
-            # print(pixel)
-
-            return
-        #     output.append(int.to_bytes(data[8*2+1], length = 2, byteorder="big", signed=False))
-
-        #     ushort pixel = BitConverter.ToUInt16(new byte[] { data[i * 2 + 1], data[i * 2] }, 0);
-
-        #     if (paletteformat == TPL_PaletteFormat.IA8) //IA8
-        #     {
-        #         r = pixel & 0xff;
-        #         b = r;
-        #         g = r;
-        #         a = pixel >> 8;
-        #     }
-        #     else if (paletteformat == TPL_PaletteFormat.RGB565) //RGB565
-        #     {
-        #         b = (((pixel >> 11) & 0x1F) << 3) & 0xff;
-        #         g = (((pixel >> 5) & 0x3F) << 2) & 0xff;
-        #         r = (((pixel >> 0) & 0x1F) << 3) & 0xff;
-        #         a = 255;
-        #     }
-        #     else //RGB5A3
-        #     {
-        #         if ((pixel & (1 << 15)) != 0) //RGB555
-        #         {
-        #             a = 255;
-        #             b = (((pixel >> 10) & 0x1F) * 255) / 31;
-        #             g = (((pixel >> 5) & 0x1F) * 255) / 31;
-        #             r = (((pixel >> 0) & 0x1F) * 255) / 31;
-        #         }
-        #         else //RGB4A3
-        #         {
-        #             a = (((pixel >> 12) & 0x07) * 255) / 7;
-        #             b = (((pixel >> 8) & 0x0F) * 255) / 15;
-        #             g = (((pixel >> 4) & 0x0F) * 255) / 15;
-        #             r = (((pixel >> 0) & 0x0F) * 255) / 15;
-        #         }
-        #     }
-
-        #     output[i] = (uint)((r << 0) | (g << 8) | (b << 16) | (a << 24));
-        # }
-
-        # return output;
-
-    def from_rgb5a3(self, data: bytes, width: int, height: int) -> list[int]:
-        """TODO"""
+        assert (
+            bpp % 8 == 0 or bpp == 4
+        ), f"BPP ({bpp}) was not a multiple of 8 (not a multiple of a byte) nor 4 (a nibble)"
+        width, height = size
+        block_width, block_height = block_size
         output_pixels: list[int] = [None] * (width * height)
         pixel_data = BytesIO(data)
 
-        for block_y in range(0, (height - 1) // 4 + 1):
-            for block_x in range(0, (width - 1) // 4 + 1):
-                for y in range(4):
-                    if block_y * 4 + y > height:
+        # i = 0
+
+        for block_y in range(0, (height - 1) // block_height + 1):
+            for block_x in range(0, (width - 1) // block_width + 1):
+                for y in range(block_height):
+                    if block_y * block_height + y > height:
                         continue
-                    for x in range(4):
-                        if block_x * 4 + x > width:
+                    for x in range(block_width):
+                        if block_x * block_width + x > width:
                             continue
-                        pixel = int.from_bytes(pixel_data.read(0x02), byteorder="big")
-                        if pixel >> 15 & 1:
-                            # No alpha component
-                            a = 0xFF
-                            r = 0x08 * (pixel >> 10 & 0x1F)
-                            g = 0x08 * (pixel >> 5 & 0x1F)
-                            b = 0x08 * (pixel >> 0 & 0x1F)
+                        if bpp == 4:
+                            # Special handling when reading nibbles
+                            pixel = int.from_bytes(pixel_data.read(1), byteorder="big")
+                            if x % 2 == 0:
+                                pixel_data.seek(-1, SEEK_CUR)
+                                pixel = pixel >> 4
+                            else:
+                                pixel = pixel & 0x0F
                         else:
-                            # Alpha component
-                            a = 0x20 * (pixel >> 12 & 0x07)
-                            r = 0x11 * (pixel >> 8 & 0x0F)
-                            g = 0x11 * (pixel >> 4 & 0x0F)
-                            b = 0x11 * (pixel >> 0 & 0x0F)
-                        index = width * y + x + block_x * 4 + block_y * (width * 4)
-                        output_pixels[index] = r << 24 | g << 16 | b << 8 | a << 0
+                            pixel = int.from_bytes(
+                                pixel_data.read(bpp // 8), byteorder="big"
+                            )
+                        index = (
+                            width * y
+                            + x
+                            + block_x * block_width
+                            + block_y * (width * block_height)
+                        )
+                        output_pixels[index] = pixel_fn(pixel, palette)
+                        # if i > 8:
+                        #     break
+                        # i += 1
                         # print(
                         #     f"index={index}\ti={i}, block_x={block_x}, block_y={block_y}, x={x}, y={y}"
                         # )
-                        # if i > 256:
-                        #     exit(0)
+        return output_pixels
 
-        print(f"wrote {width*height} pixels")
+    def palette_to_rgba(self, data: bytes, palette_format: GCNPaletteFormat):
+        """TODO"""
+        palette_data = BytesIO(data)
+        format_fn: Callable[[int], int] = None
+        match palette_format:
+            case GCNPaletteFormat.IA8:
+                format_fn = None
+                raise NotImplementedError("IA8 decoding not yet implemented")
+            case GCNPaletteFormat.RGB565:
+                format_fn = self._rgb565_to_rgba
+            case GCNPaletteFormat.RGB5A3:
+                format_fn = self._rgb5a3_to_rgba
+            case _:
+                raise NotImplementedError(
+                    f"Palette format {palette_format} is unsupported"
+                )
+        palette: list[int] = []
+        for _ in range(len(data) // 2):
+            pixel = int.from_bytes(palette_data.read(0x02), byteorder="big")
+            palette.append(format_fn(pixel, []))
+        return palette
+
+    def _i8_to_rgba(self, pixel: int, palette: list[int]) -> int:
+        """Parses an int as an I8-pixel and outputs an int representing an RGBA-pixel"""
+        return pixel << 24 | pixel << 16 | pixel << 8 | 0xFF << 0
+
+    def from_i8(self, data: bytes, width: int, height: int) -> list[int]:
+        """TODO"""
+        return self._from_gcn_encoding(
+            data, self._i8_to_rgba, (width, height), 8, (8, 4)
+        )
+
+    def _rgb5a3_to_rgba(self, pixel: int, palette: list[int]) -> int:
+        """Parses an int as an RGB5A3-pixel and outputs an int representing an RGBA-pixel"""
+        if pixel >> 15 & 1:
+            # No alpha component
+            a = 0xFF
+            r = 0x08 * (pixel >> 10 & 0x1F)
+            g = 0x08 * (pixel >> 5 & 0x1F)
+            b = 0x08 * (pixel >> 0 & 0x1F)
+        else:
+            # Alpha component
+            # if pixel & 0b1111000000000000:
+            #     print(pixel)
+            #     exit(0)
+            a = 0x20 * (pixel >> 12 & 0x07)
+            r = 0x11 * (pixel >> 8 & 0x0F)
+            g = 0x11 * (pixel >> 4 & 0x0F)
+            b = 0x11 * (pixel >> 0 & 0x0F)
+        return r << 24 | g << 16 | b << 8 | a << 0
+
+    def from_rgb5a3(self, data: bytes, width: int, height: int) -> list[int]:
+        """TODO"""
+        return self._from_gcn_encoding(
+            data, self._rgb5a3_to_rgba, (width, height), 16, (4, 4)
+        )
+
+    def _rgb565_to_rgba(self, pixel: int, palette: list[int]) -> int:
+        """Parses an int as an RGB565-pixel and outputs an int representing an RGBA-pixel"""
+        # No alpha component
+        a = 0xFF
+        r = 0x08 * (pixel >> 11 & 0x1F)
+        g = 0x04 * (pixel >> 5 & 0x3F)
+        b = 0x08 * (pixel >> 0 & 0x1F)
+        # print(f"RGBA: {r}-{g}-{b}-{a}")
+        return r << 24 | g << 16 | b << 8 | a << 0
+
+    def from_rgb565(self, data: bytes, width: int, height: int) -> list[int]:
+        """TODO"""
+
+        return self._from_gcn_encoding(
+            data, self._rgb565_to_rgba, (width, height), 16, (4, 4)
+        )
+
+    def _palette_to_rgba(self, pixel: int, palette: list[int]) -> int:
+        """Parses an int as a palette-pixel and outputs an int representing an RGBA-pixel"""
+        assert len(palette) > pixel
+        return palette[pixel]
+
+    def from_c4(
+        self, data: bytes, width: int, height: int, palette: list[int]
+    ) -> list[int]:
+        """TODO"""
+        return self._from_gcn_encoding(
+            data, self._palette_to_rgba, (width, height), 4, (8, 8), palette
+        )
+
+    def from_c8(
+        self, data: bytes, width: int, height: int, palette: list[int]
+    ) -> list[int]:
+        """TODO"""
+        return self._from_gcn_encoding(
+            data, self._palette_to_rgba, (width, height), 8, (8, 4), palette
+        )
+
+    def from_cmpr(self, data: bytes, width: int, height: int) -> list[int]:
+        """TODO"""
+        output_pixels: list[int] = [0] * (width * height)
+        img_data = BytesIO(data)
+        # Block size is 8*8
+
+        for block_y in range(0, (height - 1) // 8 + 1):
+            for block_x in range(0, (width - 1) // 8 + 1):
+                # Each block contains 2x2 sub-blocks
+                for subblock_y in range(2):
+                    for subblock_x in range(2):
+                        palette = []
+                        # Each sub-block has its own palette, utilising DXT1/BC1-compression
+                        c0 = int.from_bytes(img_data.read(0x02), byteorder="big")
+                        c1 = int.from_bytes(img_data.read(0x02), byteorder="big")
+
+                        if c0 > c1:
+                            c2 = self._average_rgb565_colors(c0, c1, 2, 1)
+                            c3 = self._average_rgb565_colors(c0, c1, 1, 2)
+                            c3 = self._rgb565_to_rgba(c3, None)
+                        else:
+                            c2 = self._average_rgb565_colors(c0, c1, 1, 1)
+                            c3 = 0x00
+
+                        palette.append(self._rgb565_to_rgba(c0, None))
+                        palette.append(self._rgb565_to_rgba(c1, None))
+                        palette.append(self._rgb565_to_rgba(c2, None))
+                        palette.append(c3)
+
+                        # Each byte represents a row in the sub-block
+                        for row in range(4):
+                            rowdata = int.from_bytes(
+                                img_data.read(0x01), byteorder="big"
+                            )
+                            for col in range(4):
+                                # Pixels in each sub-block are organised LTR, TTB
+                                #   All blocks are laid out LTR, TTB
+                                palette_index = rowdata >> ((3 - col) * 2) & 0b11
+                                img_x = col + subblock_x * 4 + block_x * 8
+                                img_y = row + subblock_y * 4 + block_y * 8
+                                index = img_x + width * img_y
+
+                                output_pixels[index] = palette[palette_index]
+        return output_pixels
+
+    def rgba_to_image(self, rgba: list[int], width: int, height: int) -> Image.Image:
+        """TODO"""
+
         img = Image.frombytes(
             "RGBA",
             (width, height),
-            b"".join([int.to_bytes(pixel, 4) for pixel in output_pixels]),
+            b"".join([int.to_bytes(pixel, 4) for pixel in rgba]),
         )
-        img.show()
-        exit(0)
-
-        inp = 0
-        r, g, b, a = 0, 0, 0, 0
-
-        for y in range(0, height, 4):
-            for x in range(0, width, 4):
-                for y1 in range(y, y + 4):
-                    for x1 in range(x, x + 4):
-                        pass
-
-        #                 ushort pixel = Shared.Swap(BitConverter.ToUInt16(tpl, inp++ * 2));
-
-        #                 if (y1 >= height || x1 >= width)
-        #                     continue;
-
-        #                 if ((pixel & (1 << 15)) != 0)
-        #                 {
-        #                     b = (((pixel >> 10) & 0x1F) * 255) / 31;
-        #                     g = (((pixel >> 5) & 0x1F) * 255) / 31;
-        #                     r = (((pixel >> 0) & 0x1F) * 255) / 31;
-        #                     a = 255;
-        #                 }
-        #                 else
-        #                 {
-        #                     a = (((pixel >> 12) & 0x07) * 255) / 7;
-        #                     b = (((pixel >> 8) & 0x0F) * 255) / 15;
-        #                     g = (((pixel >> 4) & 0x0F) * 255) / 15;
-        #                     r = (((pixel >> 0) & 0x0F) * 255) / 15;
-        #                 }
-
-        #                 output[(y1 * width) + x1] = (uint)((r << 0) | (g << 8) | (b << 16) | (a << 24));
-        #             }
-        #         }
-        #     }
-        # }
-
-        # return Shared.UIntArrayToByteArray(output);
-
-    def rgba_to_image(self, data: bytes, width: int, height: int) -> BitMapImage:
-        """TODO"""
-
-        #  if (width == 0) width = 1;
-        # if (height == 0) height = 1;
-
-        # Bitmap bmp = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-
-        # try
-        # {
-        #     System.Drawing.Imaging.BitmapData bmpData = bmp.LockBits(
-        #                             new Rectangle(0, 0, bmp.Width, bmp.Height),
-        #                             System.Drawing.Imaging.ImageLockMode.WriteOnly, bmp.PixelFormat);
-
-        #     System.Runtime.InteropServices.Marshal.Copy(data, 0, bmpData.Scan0, data.Length);
-        #     bmp.UnlockBits(bmpData);
-        # }
-        # catch { bmp.Dispose(); throw; }
-
-        # return bmp;
+        return img

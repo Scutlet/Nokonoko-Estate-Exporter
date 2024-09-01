@@ -25,18 +25,15 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
 
         header = HSFHeader(magic)
 
-        header.size = self._parse_int()
-        print(f"Header size: {header.size:#x}")
-
-        # unk
-        self._fl.seek(0x08, io.SEEK_CUR)
-
-        header.flag = self._parse_int()
         # Offsets are all relative to the start of the file
-        header.material_1s.offset = self._parse_int()
-        header.material_1s.length = self._parse_int()
+        header.fogs.offset = self._parse_int()
+        header.fogs.length = self._parse_int()
+        header.colors.offset = self._parse_int()
+        header.colors.length = self._parse_int()
         header.materials.offset = self._parse_int()
         header.materials.length = self._parse_int()
+        header.attributes.offset = self._parse_int()
+        header.attributes.length = self._parse_int()
 
         header.positions.offset = self._parse_int()
         header.positions.length = self._parse_int()
@@ -53,21 +50,36 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
         header.bones.offset = self._parse_int()
         header.bones.length = self._parse_int()
 
-        header.texture.offset = self._parse_int()
-        header.texture.length = self._parse_int()
+        header.textures.offset = self._parse_int()
+        header.textures.length = self._parse_int()
 
-        header.palette.offset = self._parse_int()
-        header.palette.length = self._parse_int()
+        header.palettes.offset = self._parse_int()
+        header.palettes.length = self._parse_int()
 
-        # unk
-        self._fl.seek(0x04, io.SEEK_CUR)
-        self._fl.seek(0x04, io.SEEK_CUR)
+        header.motions.offset = self._parse_int()
+        header.motions.length = self._parse_int()
 
-        header.rig.offset = self._parse_int()
-        header.rig.length = self._parse_int()
+        header.rigs.offset = self._parse_int()
+        header.rigs.length = self._parse_int()
 
-        # unk
-        self._fl.seek(0x38, io.SEEK_CUR)
+        header.skeletons.offset = self._parse_int()
+        header.skeletons.length = self._parse_int()
+
+        # Unused
+        header.parts.offset = self._parse_int()
+        header.parts.length = self._parse_int()
+        header.clusters.offset = self._parse_int()
+        header.clusters.length = self._parse_int()
+        header.shapes.offset = self._parse_int()
+        header.shapes.length = self._parse_int()
+        header.map_attributes.offset = self._parse_int()
+        header.map_attributes.length = self._parse_int()
+        # end unused
+
+        header.matrices.offset = self._parse_int()
+        header.matrices.length = self._parse_int()
+        header.symbols.offset = self._parse_int()
+        header.symbols.length = self._parse_int()
 
         header.stringtable.offset = self._parse_int()
         header.stringtable.length = self._parse_int()

@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-class GCNTextureFormats(Enum):
+class GCNTextureFormat(Enum):
     """
     ImageFormat specifies how the data within the image is encoded.
     Included is a chart of how many bits per pixel there are,
@@ -25,12 +25,13 @@ class GCNTextureFormats(Enum):
     CMPR = 0x0E  #  4 | 8 | 8 | 32 | mini palettes in each block, RGB565 or transparent.
 
 
-class GCNPaletteFormats(Enum):
+class GCNPaletteFormat(Enum):
     """
     PaletteFormat specifies how the data within the palette is stored. An
     image uses a single palette (except CMPR which defines its own
     mini-palettes within the Image data). Only C4, C8, and C14X2 use
     palettes. For all other formats the type and count is zero.
+    See: https://wiki.tockdom.com/wiki/Image_Formats#Palette_Formats
     See: https://github.com/KillzXGaming/Toolbox.Core/blob/3262957308e49a614fb5337eeb954993d76527fa/src/Textures/Swizzle/Gamecube/Decode_Gamecube.cs
     """
 
