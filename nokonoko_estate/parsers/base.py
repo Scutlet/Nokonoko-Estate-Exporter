@@ -38,13 +38,15 @@ class HSFParserBase(Generic[T]):
             )
         )
 
-    def _parse_int(self, size=4) -> int:
+    def _parse_int(self, size=4, signed=False) -> int:
         """Parses an int"""
-        return int.from_bytes(self._fl.read(size), byteorder=self._byteorder)
+        return int.from_bytes(
+            self._fl.read(size), byteorder=self._byteorder, signed=signed
+        )
 
-    def _parse_short(self) -> int:
+    def _parse_short(self, signed=False) -> int:
         """Parses a short"""
-        return self._parse_int(size=2)
+        return self._parse_int(size=2, signed=signed)
 
     def _parse_float(self, size=4) -> int:
         """Parses a float"""

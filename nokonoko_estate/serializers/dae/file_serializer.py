@@ -1,7 +1,16 @@
+from datetime import datetime
 import logging
 import xml.etree.ElementTree as ET
 
-from nokonoko_estate.formats.formats import HSFFile, MeshObject, PrimitiveObject
+from PIL import Image
+
+from nokonoko_estate.formats.enums import WrapMode
+from nokonoko_estate.formats.formats import (
+    HSFFile,
+    AttributeObject,
+    MeshObject,
+    PrimitiveObject,
+)
 
 
 logger = logging.Logger(__name__)
@@ -16,24 +25,29 @@ class HSFFileDAESerializer:
 
     def serialize(self):
         """TODO"""
-        header = '<?xml version="1.0" encoding="utf-8"?>'
         root = ET.Element("COLLADA")
         root.set("xmlns", "http://www.collada.org/2005/11/COLLADASchema")
         root.set("version", "1.4.1")
-        asset: ET.Sub = ET.SubElement(root, "asset")
-        author: ET.Sub = ET.SubElement(asset, "author")
-        author.text = "NokonokoEstateExporter"
-        up_axis: ET.Sub = ET.SubElement(asset, "up_axis")
+        asset = ET.SubElement(root, "asset")
+        contributor = ET.SubElement(asset, "contributor")
+        author = ET.SubElement(contributor, "authoring_tool")
+        author.text = "Nokonoko Estate Exporter"
+        created = ET.SubElement(asset, "created")
+        created.text = datetime.now().isoformat(timespec="seconds")
+        up_axis = ET.SubElement(asset, "up_axis")
         up_axis.text = "Y_UP"
 
         # Images
-        asset = ET.SubElement(root, "library_images")
+        library_images = ET.SubElement(root, "library_images")
+        for i, (name, texture) in enumerate(self._data.textures):
+            library_images.append(self.serialize_image(name, texture, i))
 
-        # Materials
-        asset = ET.SubElement(root, "library_materials")
-
-        # Effects
-        asset = ET.SubElement(root, "library_effects")
+        # Materials & Effects
+        library_materials = ET.SubElement(root, "library_materials")
+        library_effects = ET.SubElement(root, "library_effects")
+        for i, mat in enumerate(self._data.materials):
+            library_materials.append(self.serialize_material(mat, i))
+            library_effects.append(self.serialize_effects(mat, i))
 
         # Geometry
         geometries = ET.SubElement(root, "library_geometries")
@@ -65,6 +79,72 @@ class HSFFileDAESerializer:
         # print()
         # print(b_xml.decode("utf-8"))
 
+    def serialize_image(
+        self, name: str, texture: Image.Image, index: int
+    ) -> ET.Element:
+        """Serializes textures into <image> nodes"""
+        image = ET.Element(
+            "image",
+            id=f"texture_{index:03}",
+            name=name,
+            width=str(texture.width),
+            height=str(texture.height),
+        )
+        init = ET.SubElement(image, "init_from")
+        init.text = f"images/{name}.png"
+        return image
+
+    def serialize_material(self, material: AttributeObject, index: int) -> ET.Element:
+        """TODO"""
+        mat = ET.Element("material", id=f"material_{index:03}")
+        ET.SubElement(mat, "instance_effect", url=f"#Effect_material_{index:03}")
+        return mat
+
+    def serialize_effects(self, material: AttributeObject, index: int) -> ET.Element:
+        """TODO"""
+        effect = ET.Element("effect", id=f"Effect_material_{index:03}")
+        profile = ET.SubElement(effect, "profile_COMMON")
+        surface_param = ET.SubElement(
+            profile, "newparam", sid=f"surface_material_{index:03}"
+        )
+        surface = ET.SubElement(surface_param, "surface", type="2D")
+        ET.SubElement(surface, "init_from").text = (
+            f"texture_{material.texture_index:03}"
+        )
+        ET.SubElement(surface, "format").text = f"A8R8G8B8"
+
+        sampler_param = ET.SubElement(
+            profile, "newparam", sid=f"sampler_material_{index:03}"
+        )
+        sampler2d = ET.SubElement(sampler_param, "sampler2D")
+        ET.SubElement(sampler2d, "source").text = f"surface_material_{index:03}"
+
+        collada_wrap_modes = {
+            WrapMode.REPEAT: "WRAP",
+            WrapMode.MIRROR: "MIRROR",
+            WrapMode.CLAMP: "CLAMP",
+        }
+        ET.SubElement(sampler2d, "wrap_s").text = collada_wrap_modes[material.wrap_s]
+        ET.SubElement(sampler2d, "wrap_t").text = collada_wrap_modes[material.wrap_t]
+        ET.SubElement(sampler2d, "mipmap_maxlevel").text = str(material.mipmap_max_lod)
+
+        technique = ET.SubElement(profile, "technique", sid="common")
+        phong = ET.SubElement(technique, "phong")
+        diffuse = ET.SubElement(phong, "diffuse")
+        ET.SubElement(
+            diffuse, "texture", texture=f"sampler_material_{index:03}", texcoord=""
+        )
+        if material.alpha_flag:
+            transparent = ET.SubElement(phong, "transparent")
+            ET.SubElement(
+                transparent,
+                "texture",
+                texture=f"sampler_material_{index:03}",
+                texcoord="",
+            )
+
+        return effect
+
     def serialize_geometry(self, mesh_obj: MeshObject) -> ET.Element:
         """TODO"""
 
@@ -83,8 +163,19 @@ class HSFFileDAESerializer:
         )
 
         # These index the mesh vertices
-        polygons = ET.SubElement(mesh, "polylist", count="1")  # material=foo
-        triangles = ET.SubElement(mesh, "triangles", count="1")  # material=foo
+        #   Assume that all primitives in the mesh use the same material
+        polygons = ET.SubElement(
+            mesh,
+            "polylist",
+            material=f"material_{mesh_obj.primitives[0].material:03}",
+            count="1",
+        )
+        triangles = ET.SubElement(
+            mesh,
+            "triangles",
+            material=f"material_{mesh_obj.primitives[0].material:03}",
+            count="1",
+        )
 
         for poly in self._serialize_inputs(mesh_obj):
             polygons.append(poly)
@@ -97,8 +188,6 @@ class HSFFileDAESerializer:
         vcount_poly_elems: list[str] = []
         p_tri_elems: list[str] = []
         p_poly_elems: list[str] = []
-
-        # p_tri.text = "0 1 2 3 4 5"
 
         for primitive in mesh_obj.primitives:
             match primitive.primitive_type:
@@ -236,6 +325,23 @@ class HSFFileDAESerializer:
         geo = ET.SubElement(
             node, "instance_geometry", url=f"#{mesh_obj.name}-mesh", name=mesh_obj.name
         )
+
+        bind_material = ET.SubElement(geo, "bind_material")
+        technique = ET.SubElement(bind_material, "technique_common")
+        mat_index = mesh_obj.primitives[0].material
+        instance_material = ET.SubElement(
+            technique,
+            "instance_material",
+            symbol=f"material_{mat_index:03}",
+            target=f"#material_{mat_index:03}",
+        )
+
+        # <bind_material>
+        #     <technique_common>
+        #       <instance_material symbol="material_0" target="#material_0" />
+        #     </technique_common>
+        #   </bind_material>
+
         return node
 
         # <node id="stair" name="stair" type="NODE">

@@ -1,10 +1,12 @@
 import io
 
+from nokonoko_estate.formats.enums import CombinerBlend, WrapMode
 from nokonoko_estate.formats.formats import (
+    AttrTransform,
     AttributeHeader,
     HSFHeader,
-    Material1Object,
-    MaterialObject,
+    MaaterialObject,
+    AttributeObject,
     PaletteInfo,
     TextureInfo,
     Vertex,
@@ -101,17 +103,59 @@ class VertexParser(HSFParserBase[Vertex]):
     struct_formatting = ">hhhh"
 
 
-class MaterialObjectParser(HSFParserBase[MaterialObject]):
+class AttributeParser(HSFParserBase[AttributeObject]):
     """TODO"""
 
-    _data_type = MaterialObject
-    struct_formatting = ">lllllllllllllllli"
+    _data_type = AttributeObject
+
+    def parse(self) -> AttributeObject:
+        name_offset = self._parse_int(signed=True)
+        obj = AttributeObject(name_offset)
+
+        obj.tex_animation_offset = self._parse_int(signed=True)
+        obj.unk_1 = self._parse_short()
+        obj.blend_flag = CombinerBlend(self._parse_int(0x1, signed=True))
+        obj.alpha_flag = bool(self._parse_int(0x1))
+        obj.blend_texture_alpha = self._parse_float()
+        obj.unk_2 = self._parse_int()
+        obj.nbt_enable = self._parse_float()
+        obj.unk_3 = self._parse_float()
+        obj.unk_4 = self._parse_float()
+        obj.texture_enable = self._parse_float()
+        obj.unk_5 = self._parse_float()
+        obj.tex_anim_start = AttrTransform(
+            (self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float()),
+        )
+        obj.tex_anim_end = AttrTransform(
+            (self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float()),
+        )
+        obj.unk_6 = self._parse_float()
+        obj.rotation = (self._parse_float(), self._parse_float(), self._parse_float())
+        obj.unk_7 = self._parse_float()
+        obj.unk_8 = self._parse_float()
+        obj.unk_9 = self._parse_float()
+
+        obj.wrap_s = WrapMode(self._parse_int(signed=True))
+        obj.wrap_t = WrapMode(self._parse_int(signed=True))
+
+        obj.unk_10 = self._parse_int()
+        obj.unk_11 = self._parse_int()
+        obj.unk_12 = self._parse_int()
+
+        obj.mipmap_max_lod = self._parse_int(signed=True)
+        obj.texture_index = self._parse_int(signed=True)
+
+        print(f"End reading material data 0: {self._fl.tell():#x}")
+
+        return obj
 
 
-class Material1ObjectParser(HSFParserBase[Material1Object]):
+class MaterialObjectParser(HSFParserBase[MaaterialObject]):
     """TODO"""
 
-    _data_type = Material1Object
+    _data_type = MaaterialObject
     struct_formatting = ">lllllliii"
 
 

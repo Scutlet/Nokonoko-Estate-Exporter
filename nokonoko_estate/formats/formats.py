@@ -6,6 +6,8 @@ from typing import ClassVar, Self
 
 from PIL import Image
 
+from nokonoko_estate.formats.enums import CombinerBlend, WrapMode
+
 # See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
 
 
@@ -28,8 +30,8 @@ class HSFFile:
     mesh_objects: dict[str, "MeshObject"] = field(default_factory=dict)
     textures: list[tuple[str, Image.Image]] = field(default_factory=list)
     bones: list["BoneObject"] = field(default_factory=list)
-    materials_1: list["Material1Object"] = field(default_factory=list)
-    materials: list["MaterialObject"] = field(default_factory=list)
+    materials_1: list["MaaterialObject"] = field(default_factory=list)
+    materials: list["AttributeObject"] = field(default_factory=list)
 
 
 @dataclass
@@ -211,32 +213,57 @@ class BoneObject(HSFData):
 
 
 @dataclass
-class MaterialObject(HSFData):  # struct
+class AttrTransform:
+    """TODO"""
+
+    scale: tuple[float, float] = field(default_factory=lambda: (1, 1))
+    position: tuple[float, float] = field(default_factory=lambda: (0, 0))
+
+
+@dataclass
+class AttributeObject(HSFData):
     """TODO
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
-    unk_1: int  # long
-    unk_2: int  # long
-    unk_3: int  # long
-    unk_4: int  # long
-    unk_5: int  # long
-    unk_6: int  # long
-    unk_7: int  # long
-    unk_8: int  # long
-    unk_9: int  # long
-    unk_10: int  # long
-    unk_11: int  # long
-    unk_12: int  # long
-    unk_13: int  # long
-    unk_14: int  # long
-    unk_15: int  # long
-    unk_16: int  # long
-    texture_index: int
+    name_offset: int  # uint
+    tex_animation_offset: int = (
+        0  # Replaced with Pointer to Texture Animation at Runtime
+    )
+    unk_1: int = 0  # ushort
+    blend_flag: CombinerBlend = CombinerBlend.ADDITIVE  # byte
+    alpha_flag: bool = False  # Alpha textures use 1 else 0
+    blend_texture_alpha: float = (
+        1  # Blend with texture alpha else use register color 2 from alpha output
+    )
+    unk_2: int = 1
+    nbt_enable: float = 0  # 0 is diabled; 1 is enabled
+    unk_3: float = -1
+    unk_4: float = 0
+    texture_enable: float = 1  # 0 is diabled; 1 is enabled
+    unk_5: float = 0
+    tex_anim_start: AttrTransform = field(default_factory=AttrTransform)
+    tex_anim_end: AttrTransform = field(default_factory=AttrTransform)
+    unk_6: float = 0
+    rotation: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+
+    unk_7: float = 1.0
+    unk_8: float = 1.0
+    unk_9: float = 1.0
+
+    wrap_s: WrapMode = WrapMode.REPEAT
+    wrap_t: WrapMode = WrapMode.REPEAT
+
+    unk_10: int = 1
+    unk_11: int = 79
+    unk_12: int = 0
+
+    mipmap_max_lod: int = 1
+    texture_index: int = -1
 
 
 @dataclass
-class Material1Object(HSFData):  # struct
+class MaaterialObject(HSFData):  # struct
     """TODO
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """

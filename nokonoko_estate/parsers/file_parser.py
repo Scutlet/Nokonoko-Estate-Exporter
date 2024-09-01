@@ -9,8 +9,8 @@ from nokonoko_estate.formats.formats import (
     AttributeHeader,
     HSFData,
     HSFFile,
-    Material1Object,
-    MaterialObject,
+    MaaterialObject,
+    AttributeObject,
     MeshObject,
     BoneObject,
     PaletteInfo,
@@ -22,8 +22,8 @@ from nokonoko_estate.parsers.base import HSFParserBase
 from nokonoko_estate.parsers.parsers import (
     AttributeHeaderParser,
     HSFHeaderParser,
-    Material1ObjectParser,
     MaterialObjectParser,
+    AttributeParser,
     PaletteInfoParser,
     TextureInfoParser,
     VertexParser,
@@ -43,8 +43,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._mesh_objects: dict[str, MeshObject] = {}
         self._textures: list[tuple[str, Image.Image]] = []
         self._bones: list[BoneObject] = []
-        self._materials_1: list[Material1Object] = []
-        self._materials: list[MaterialObject] = []
+        self._materials: list[MaaterialObject] = []
+        self._attributes: list[AttributeObject] = []
 
     def parse_from_file(self) -> HSFFile:
         """TODO"""
@@ -59,8 +59,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             self._mesh_objects,
             self._textures,
             self._bones,
-            self._materials_1,
             self._materials,
+            self._attributes,
         )
 
     def parse(self) -> HSFFile:
@@ -76,20 +76,22 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         # Materials
         self._fl.seek(self._header.attributes.offset, io.SEEK_SET)
-        self._materials = self._parse_array(
-            MaterialObjectParser, self._header.attributes.length
+        self._attributes = self._parse_array(
+            AttributeParser, self._header.attributes.length
         )
-        print(f"{len(self._materials)} materials identified!")
+        print(self._attributes)
+        print(f"{len(self._attributes)} attributes identified!")
 
         # Materials 1
         self._fl.seek(self._header.materials.offset, io.SEEK_SET)
         self._materials = self._parse_array(
-            Material1ObjectParser, self._header.materials.length
+            MaterialObjectParser, self._header.materials.length
         )
-        print(f"{len(self._materials_1)} material_1s identified!")
+        print(f"{len(self._materials)} materials identified!")
 
         # (Vertex) positions
         self._fl.seek(self._header.positions.offset, io.SEEK_SET)
+        print(f"Positions start ofs: {self._fl.tell():#x}")
         position_headers = self._parse_array(
             AttributeHeaderParser, self._header.positions.length
         )
@@ -350,7 +352,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         for tex_info in tex_infos:
             tex_name = self._parse_from_stringtable(tex_info.name_offset, -1)
-            print(f"> Identified texture {tex_name} ({tex_info.tex_format})")
 
             format: GCNTextureFormat = None
             match tex_info.tex_format:
@@ -362,11 +363,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     format = GCNTextureFormat.C8
                 case _:
                     raise NotImplementedError(
-                        f"Invalid tex_format found: {tex_info.tex_format}"
+                        f"Invalid tex_format found for {tex_name}: {tex_info.tex_format}"
                     )
             if format == GCNTextureFormat.C8 and tex_info.bpp == 4:
                 format = GCNTextureFormat.C4
 
+            print(f"> Identified texture {tex_name} ({format.name})")
             pal_data: bytes = bytes()
             pal_format: GCNPaletteFormat | None = None
             match tex_info.tex_format:
@@ -394,9 +396,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             bitmap = BitMapImage.convert_from_texture(
                 data, tex_info.width, tex_info.height, format, pal_data, pal_format
             )
-            # if "kanban" in tex_name:
-            #     bitmap.show()
-            #     exit(0)
 
             if bitmap is not None:
                 self._textures.append((tex_name, bitmap))

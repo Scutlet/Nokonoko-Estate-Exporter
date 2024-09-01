@@ -4,7 +4,7 @@ from nokonoko_estate.parsers.file_parser import HSFFileParser
 from nokonoko_estate.serializers.dae.file_serializer import HSFFileDAESerializer
 
 FILENAME = "resources/w05_file24.hsf"
-FILENAME = "resources/w05_file0.hsf"
+# FILENAME = "resources/w05_file0.hsf"
 OUTPUT_FOLDER = "output"
 
 if __name__ == "__main__":
@@ -20,7 +20,7 @@ if __name__ == "__main__":
         name = name.replace("\\", "")
         output_fp = f"{os.path.join(OUTPUT_FOLDER, basename, 'images', name)}.png"
         tex.save(output_fp)
-        print(f"Exported texture to {output_fp}")
+        # print(f"Exported texture to {output_fp}")
 
     serializer = HSFFileDAESerializer(
         data,

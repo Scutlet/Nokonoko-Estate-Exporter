@@ -38,3 +38,21 @@ class GCNPaletteFormat(Enum):
     IA8 = 0x00
     RGB565 = 0x01
     RGB5A3 = 0x02
+
+
+class CombinerBlend(Enum):
+    """TODO"""
+
+    # Mixes current and last stages by texture alpha with a new stage
+    TRANSPARENCY_MIX = 0
+
+    # Combines current and last stage by adding.
+    ADDITIVE = 2
+
+
+class WrapMode(Enum):
+    """Texture wrapping"""
+
+    CLAMP = 0
+    REPEAT = 1
+    MIRROR = 2
