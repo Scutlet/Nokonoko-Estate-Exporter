@@ -58,7 +58,6 @@ class BitMapImage:
         """TODO"""
         img = TPLImage()
         rgba: list[int] = []
-        palette_pixels: list[int] = []
 
         if palette_format is not None:
             # Parse Palette
@@ -82,15 +81,12 @@ class BitMapImage:
                 raise NotImplementedError("RGBA32 not implemented")
             case GCNTextureFormat.C4:
                 rgba = img.from_c4(data, width, height, pallete_pixels)
-                raise NotImplementedError("C4 not implemented")
             case GCNTextureFormat.C8:
                 rgba = img.from_c8(data, width, height, pallete_pixels)
             case GCNTextureFormat.CMPR:
                 rgba = img.from_cmpr(data, width, height)
-                # raise NotImplementedError("CMPR not implemented")
             case _:
-                # TODO: Error
-                pass
+                raise NotImplementedError(f"Cannot decode texture format {format}")
         return img.rgba_to_image(rgba, width, height)
 
 
@@ -217,18 +213,18 @@ class TPLImage:
         if pixel >> 15 & 1:
             # No alpha component
             a = 0xFF
-            r = 0x08 * (pixel >> 10 & 0x1F)
-            g = 0x08 * (pixel >> 5 & 0x1F)
-            b = 0x08 * (pixel >> 0 & 0x1F)
+            r = (pixel >> 10 & 0x1F) * 255 // 0x1F
+            g = (pixel >> 5 & 0x1F) * 255 // 0x1F
+            b = (pixel >> 0 & 0x1F) * 255 // 0x1F
         else:
             # Alpha component
             # if pixel & 0b1111000000000000:
             #     print(pixel)
             #     exit(0)
-            a = 0x20 * (pixel >> 12 & 0x07)
-            r = 0x11 * (pixel >> 8 & 0x0F)
-            g = 0x11 * (pixel >> 4 & 0x0F)
-            b = 0x11 * (pixel >> 0 & 0x0F)
+            a = (pixel >> 12 & 0x07) * 255 // 0x07
+            r = (pixel >> 8 & 0x0F) * 255 // 0x0F
+            g = (pixel >> 4 & 0x0F) * 255 // 0x0F
+            b = (pixel >> 0 & 0x0F) * 255 // 0x0F
         return r << 24 | g << 16 | b << 8 | a << 0
 
     def from_rgb5a3(self, data: bytes, width: int, height: int) -> list[int]:
@@ -241,9 +237,9 @@ class TPLImage:
         """Parses an int as an RGB565-pixel and outputs an int representing an RGBA-pixel"""
         # No alpha component
         a = 0xFF
-        r = 0x08 * (pixel >> 11 & 0x1F)
-        g = 0x04 * (pixel >> 5 & 0x3F)
-        b = 0x08 * (pixel >> 0 & 0x1F)
+        r = (pixel >> 11 & 0x1F) * 255 // 0x1F
+        g = (pixel >> 5 & 0x3F) * 255 // 0x3F
+        b = (pixel >> 0 & 0x1F) * 255 // 0x1F
         # print(f"RGBA: {r}-{g}-{b}-{a}")
         return r << 24 | g << 16 | b << 8 | a << 0
 
