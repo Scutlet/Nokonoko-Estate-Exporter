@@ -27,10 +27,10 @@ class HSFTable:
 class HSFFile:
     """HSF File"""
 
-    mesh_objects: dict[str, "MeshObject"] = field(default_factory=dict)
+    mesh_objects: dict[str, dict[int, "MeshObject"]] = field(default_factory=dict)
     textures: list[tuple[str, Image.Image]] = field(default_factory=list)
     bones: list["BoneObject"] = field(default_factory=list)
-    materials_1: list["MaaterialObject"] = field(default_factory=list)
+    materials_1: list["MaterialObject"] = field(default_factory=list)
     materials: list["AttributeObject"] = field(default_factory=list)
 
 
@@ -263,7 +263,7 @@ class AttributeObject(HSFData):
 
 
 @dataclass
-class MaaterialObject(HSFData):  # struct
+class MaterialObject(HSFData):  # struct
     """TODO
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """

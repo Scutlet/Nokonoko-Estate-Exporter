@@ -5,7 +5,7 @@ from nokonoko_estate.formats.formats import (
     AttrTransform,
     AttributeHeader,
     HSFHeader,
-    MaaterialObject,
+    MaterialObject,
     AttributeObject,
     PaletteInfo,
     TextureInfo,
@@ -114,7 +114,10 @@ class AttributeParser(HSFParserBase[AttributeObject]):
 
         obj.tex_animation_offset = self._parse_int(signed=True)
         obj.unk_1 = self._parse_short()
-        obj.blend_flag = CombinerBlend(self._parse_int(0x1, signed=True))
+        try:
+            obj.blend_flag = CombinerBlend(self._parse_int(0x1, signed=True))
+        except ValueError:
+            pass
         obj.alpha_flag = bool(self._parse_int(0x1))
         obj.blend_texture_alpha = self._parse_float()
         obj.unk_2 = self._parse_int()
@@ -137,8 +140,14 @@ class AttributeParser(HSFParserBase[AttributeObject]):
         obj.unk_8 = self._parse_float()
         obj.unk_9 = self._parse_float()
 
-        obj.wrap_s = WrapMode(self._parse_int(signed=True))
-        obj.wrap_t = WrapMode(self._parse_int(signed=True))
+        try:
+            obj.wrap_s = WrapMode(self._parse_int(signed=True))
+        except ValueError:
+            pass
+        try:
+            obj.wrap_t = WrapMode(self._parse_int(signed=True))
+        except ValueError:
+            pass
 
         obj.unk_10 = self._parse_int()
         obj.unk_11 = self._parse_int()
@@ -147,15 +156,15 @@ class AttributeParser(HSFParserBase[AttributeObject]):
         obj.mipmap_max_lod = self._parse_int(signed=True)
         obj.texture_index = self._parse_int(signed=True)
 
-        print(f"End reading material data 0: {self._fl.tell():#x}")
+        # print(f"End reading attribute data: {self._fl.tell():#x}")
 
         return obj
 
 
-class MaterialObjectParser(HSFParserBase[MaaterialObject]):
+class MaterialObjectParser(HSFParserBase[MaterialObject]):
     """TODO"""
 
-    _data_type = MaaterialObject
+    _data_type = MaterialObject
     struct_formatting = ">lllllliii"
 
 

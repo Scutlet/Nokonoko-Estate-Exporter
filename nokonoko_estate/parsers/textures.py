@@ -61,7 +61,7 @@ class BitMapImage:
 
         if palette_format is not None:
             # Parse Palette
-            print(f">> Palette format {palette_format.name}")
+            # print(f">> Palette format {palette_format.name}")
             pallete_pixels = img.palette_to_rgba(palette_data, palette_format)
 
         match format:

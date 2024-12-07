@@ -9,7 +9,7 @@ from nokonoko_estate.formats.formats import (
     AttributeHeader,
     HSFData,
     HSFFile,
-    MaaterialObject,
+    MaterialObject,
     AttributeObject,
     MeshObject,
     BoneObject,
@@ -40,10 +40,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         super().__init__(None, None)
         self.filepath = filepath
 
-        self._mesh_objects: dict[str, MeshObject] = {}
+        # Attribute header index is used as a key
+        self._mesh_objects: dict[str, dict[int, MeshObject]] = {}
         self._textures: list[tuple[str, Image.Image]] = []
         self._bones: list[BoneObject] = []
-        self._materials: list[MaaterialObject] = []
+        self._materials: list[MaterialObject] = []
         self._attributes: list[AttributeObject] = []
 
     def parse_from_file(self) -> HSFFile:
@@ -79,7 +80,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._attributes = self._parse_array(
             AttributeParser, self._header.attributes.length
         )
-        print(self._attributes)
+        # print(self._attributes)
         print(f"{len(self._attributes)} attributes identified!")
 
         # Materials 1
@@ -191,25 +192,26 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             # AttributeHeader data is size 48?
             extra_ofs += 48 * attr.data_count
 
-        meshobj_index = 0
-        for attr in headers:
+        for i, attr in enumerate(headers):
+            # A mesh name can occur multiple times. In such a case, each meshObj is a different part of the mesh
+            #   TODO: what about materials?
             prim_name = self._parse_from_stringtable(attr.string_offset, -1)
             # print(prim_name)
-            if prim_name in self._mesh_objects:
-                # Mesh object already parsed
-                continue
+
+            if not prim_name in self._mesh_objects:
+                # Mesh object not seen before
+                self._mesh_objects[prim_name] = {}
 
             mesh_obj = MeshObject(prim_name)
-            self._mesh_objects[prim_name] = mesh_obj
-            meshobj_index += 1
-            # print(f"{mesh_obj.name} contains {attr.data_count} primitive(s)")
+            self._mesh_objects[prim_name][i] = mesh_obj
+            print(f"{mesh_obj.name} contains {attr.data_count} primitive(s)")
 
             self._fl.seek(ofs + attr.data_offset)
-            for i in range(attr.data_count):
+            for j in range(attr.data_count):
                 primitive_type = PrimitiveObject.PrimitiveType(self._parse_short())
                 material = self._parse_short() & 0xFF
                 prim_obj = PrimitiveObject(primitive_type, material)
-                self._mesh_objects[prim_name].primitives.append(prim_obj)
+                self._mesh_objects[prim_name][i].primitives.append(prim_obj)
 
                 num_vertices = 3
                 if primitive_type in (
@@ -218,14 +220,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 ):
                     # NB: For w05_file24.hsf, the primitive_type is always 3
                     num_vertices = 4
-
-                prim_obj.vertices = self._parse_array(VertexParser, num_vertices)
-
-                if (
+                elif (
                     primitive_type
                     == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP
                 ):
-                    raise NotImplementedError()
+                    raise NotImplementedError("Cannot parse triangle strips")
                     num_vertices = self._parse_int()
                     ofs = self._parse_int()
                     xxx = self._fl.tell()
@@ -240,16 +239,19 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     new_vert[3] = new_vert[1]
                     new_vert += deepcopy(vertices)
                     prim_obj.vertices = new_vert
+                else:
+                    raise NotImplementedError(f"Cannot parse {primitive_type.name}")
 
+                prim_obj.vertices = self._parse_array(VertexParser, num_vertices)
                 prim_obj.unk = (self._parse_int(), self._parse_int(), self._parse_int())
 
     def _parse_positions(self, headers: list[AttributeHeader]):
         """TODO"""
         start_ofs = self._fl.tell()
-        for attr in headers:
+        for i, attr in enumerate(headers):
             ofs = self._fl.seek(start_ofs + attr.data_offset)
             positions: list[tuple[float, float, float]] = []
-            for i in range(attr.data_count):
+            for j in range(attr.data_count):
                 positions.append(
                     # Parses raw bytes in Metanoia, instead of floats
                     (self._parse_float(), self._parse_float(), self._parse_float())
@@ -262,8 +264,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 self.logger.warning(
                     f"{name} was not present in self._mesh_objects, but some (vertex) positions referenced it!"
                 )
+                raise ValueError()
                 self._mesh_objects[name] = MeshObject(name)
-            self._mesh_objects[name].positions += positions
+            self._mesh_objects[name][i].positions += positions
             # print(f"Parsed {len(positions)} (vertex) positions for mesh {name}")
 
     def _parse_normals(self, headers: list[AttributeHeader]):
@@ -280,10 +283,10 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             #     flag = 4;
             raise NotImplementedError()
 
-        for attr in headers:
+        for i, attr in enumrate(headers):
             ofs = self._fl.seek(start_ofs + attr.data_offset)
             normals: list[tuple[int, int, int]] = []
-            for i in range(attr.data_count):
+            for j in range(attr.data_count):
                 if flag == 4:
                     # TODO
                     # nrmList.Add(new Vector3(reader.ReadSByte() / (float)sbyte.MaxValue, reader.ReadSByte() / (float)sbyte.MaxValue, reader.ReadSByte() / (float)sbyte.MaxValue));
@@ -300,17 +303,18 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 self.logger.warning(
                     f"{name} was not present in self._mesh_objects, but some (face) normals referenced it!"
                 )
+                raise ValueError()
                 self._mesh_objects[name] = MeshObject(name)
-            self._mesh_objects[name].normals += normals
+            self._mesh_objects[name][i].normals += normals
             print(f"Parsed {len(normals)} (vertex) normals for mesh {name}")
 
     def _parse_uvs(self, headers: list[AttributeHeader]):
         start_ofs = self._fl.tell()
 
-        for attr in headers:
+        for i, attr in enumerate(headers):
             ofs = self._fl.seek(start_ofs + attr.data_offset)
             uv_coords: list[tuple[int, int]] = []
-            for i in range(attr.data_count):
+            for j in range(attr.data_count):
                 uv_coords.append(
                     # Parses raw bytes in Metanoia, instead of floats
                     (self._parse_float(), self._parse_float())
@@ -323,8 +327,13 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 self.logger.warning(
                     f"{name} was not present in self._mesh_objects, but some (vertex) UV referenced it!"
                 )
+                raise ValueError()
                 self._mesh_objects[name] = MeshObject(name)
-            self._mesh_objects[name].uvs += uv_coords
+            if i not in self._mesh_objects[name]:
+                # TODO
+                logger.warning("oh noes!")
+            else:
+                self._mesh_objects[name][i].uvs += uv_coords
             # print(f"Parsed {len(uv_coords)} (vertex) UV's for mesh {name}")
 
     def _parse_textures(self):
@@ -368,7 +377,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             if format == GCNTextureFormat.C8 and tex_info.bpp == 4:
                 format = GCNTextureFormat.C4
 
-            print(f"> Identified texture {tex_name} ({format.name})")
+            # print(f"> Identified texture {tex_name} ({format.name})")
             pal_data: bytes = bytes()
             pal_format: GCNPaletteFormat | None = None
             match tex_info.tex_format:
