@@ -7,12 +7,16 @@ from PIL import Image
 from nokonoko_estate.formats.enums import GCNPaletteFormat, GCNTextureFormat
 from nokonoko_estate.formats.formats import (
     AttributeHeader,
+    HSFAttributes,
+    HSFNode,
+    NodeTransform,
     HSFData,
     HSFFile,
+    HSFNodeType,
     MaterialObject,
     AttributeObject,
     MeshObject,
-    BoneObject,
+    HSFNodeData,
     PaletteInfo,
     PrimitiveObject,
     TextureInfo,
@@ -22,6 +26,7 @@ from nokonoko_estate.parsers.base import HSFParserBase
 from nokonoko_estate.parsers.parsers import (
     AttributeHeaderParser,
     HSFHeaderParser,
+    HSFNodeParser,
     MaterialObjectParser,
     AttributeParser,
     PaletteInfoParser,
@@ -31,6 +36,7 @@ from nokonoko_estate.parsers.parsers import (
 from nokonoko_estate.parsers.textures import BitMapImage, get_texture_byte_size
 
 logger = logging.Logger(__name__)
+PrimitiveType = PrimitiveObject.PrimitiveType
 
 
 class HSFFileParser(HSFParserBase[HSFFile]):
@@ -40,12 +46,20 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         super().__init__(None, None)
         self.filepath = filepath
 
-        # Attribute header index is used as a key
-        self._mesh_objects: dict[str, dict[int, MeshObject]] = {}
+        # There should be only one node without a parent
+        self._root_node: HSFNode = None
+        self._nodes: list[HSFNode] = []
+        # Attribute header index is used as a key TODO: doesn't work properly!
+        self._primitives: list[HSFAttributes[PrimitiveObject]] = []
+        self._positions: list[HSFAttributes[tuple[float, float, float]]] = []
+        self._uvs: list[HSFAttributes[tuple[float, float]]] = []
+
         self._textures: list[tuple[str, Image.Image]] = []
-        self._bones: list[BoneObject] = []
         self._materials: list[MaterialObject] = []
         self._attributes: list[AttributeObject] = []
+
+        # symbol indices (reference children)
+        self._symbols: list[int] = []
 
     def parse_from_file(self) -> HSFFile:
         """TODO"""
@@ -57,9 +71,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
     def _output_file(self):
         """TODO"""
         return HSFFile(
-            self._mesh_objects,
+            self._nodes,
             self._textures,
-            self._bones,
             self._materials,
             self._attributes,
         )
@@ -73,58 +86,70 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         primitive_headers = self._parse_array(
             AttributeHeaderParser, self._header.primitives.length
         )
-        self._parse_primitives(primitive_headers)
+        self._primitives = self._parse_primitives(primitive_headers)
+        print(f"{len(self._primitives)} primitives identified!")
 
         # Materials
-        self._fl.seek(self._header.attributes.offset, io.SEEK_SET)
-        self._attributes = self._parse_array(
-            AttributeParser, self._header.attributes.length
-        )
-        # print(self._attributes)
-        print(f"{len(self._attributes)} attributes identified!")
-
-        # Materials 1
         self._fl.seek(self._header.materials.offset, io.SEEK_SET)
         self._materials = self._parse_array(
             MaterialObjectParser, self._header.materials.length
         )
-        print(f"{len(self._materials)} materials identified!")
+        print(f"Identified {len(self._materials)} Materials")
+
+        # Attributes TODO
+        self._fl.seek(self._header.attributes.offset, io.SEEK_SET)
+        self._attributes = self._parse_array(
+            AttributeParser, self._header.attributes.length
+        )
+        print(f"Identified {len(self._attributes)} attributes(s)")
 
         # (Vertex) positions
         self._fl.seek(self._header.positions.offset, io.SEEK_SET)
-        print(f"Positions start ofs: {self._fl.tell():#x}")
         position_headers = self._parse_array(
             AttributeHeaderParser, self._header.positions.length
         )
-        self._parse_positions(position_headers)
+        self._positions = self._parse_positions(position_headers)
+        print(f"Identified {len(self._positions)} position(s)")
 
-        # (Face) Normals
+        # (Face) Normals TODO
         self._fl.seek(self._header.normals.offset, io.SEEK_SET)
         normal_headers = self._parse_array(
             AttributeHeaderParser, self._header.normals.length
         )
         self._parse_normals(normal_headers)
 
-        # (Vertex) UV's
+        # (Vertex) UV's TODO
         self._fl.seek(self._header.uvs.offset, io.SEEK_SET)
         uv_headers = self._parse_array(AttributeHeaderParser, self._header.uvs.length)
         self._parse_uvs(uv_headers)
+
+        # Symbols
+        self._fl.seek(self._header.symbols.offset)
+        self._symbols = []
+        for _ in range(self._header.symbols.length):
+            self._symbols.append(self._parse_int(signed=True))
+
+        # Nodes (these tie everything together)
+        self._fl.seek(self._header.nodes.offset)
+        self._nodes = self._parse_nodes()
+        print(f"Identified {len(self._nodes)} node(s)")
+        for node in self._nodes:
+            self._setup_node_references(node)
+        # Can only verify once all references have been set up
+        for node in self._nodes:
+            self._verify_node_references(node)
 
         # Textures
         self._fl.seek(self._header.textures.offset, io.SEEK_SET)
         self._parse_textures()
 
-        # Bones
-        self._fl.seek(self._header.bones.offset)
-        self._parse_bones()
-
         # ???
         end_ofs = self._header.rigs.offset + self._header.rigs.length * 0x24
         self._fl.seek(self._header.rigs.offset)
 
-        meshnames = list(self._mesh_objects.keys())
+        # meshnames = list(self._mesh_objects.keys())
         for i in range(self._header.rigs.length):
-            mesh_obj = self._mesh_objects[meshnames[i]]
+            # mesh_obj = self._mesh_objects[meshnames[i]]
             raise NotImplementedError("Rigging not implemented")
 
         # uint endOffset = rigOffset + (uint)(rigCount * 0x24);
@@ -183,7 +208,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         #     }
         # }
 
-    def _parse_primitives(self, headers: list[AttributeHeader]):
+    def _parse_primitives(
+        self, headers: list[AttributeHeader]
+    ) -> list[HSFAttributes[PrimitiveObject]]:
         """TODO"""
         ofs = self._fl.tell()
         extra_ofs = self._fl.tell()
@@ -192,82 +219,69 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             # AttributeHeader data is size 48?
             extra_ofs += 48 * attr.data_count
 
-        for i, attr in enumerate(headers):
-            # A mesh name can occur multiple times. In such a case, each meshObj is a different part of the mesh
-            #   TODO: what about materials?
+        result: list[HSFAttributes[PrimitiveObject]] = []
+        for attr in headers:
             prim_name = self._parse_from_stringtable(attr.string_offset, -1)
-            # print(prim_name)
-
-            if not prim_name in self._mesh_objects:
-                # Mesh object not seen before
-                self._mesh_objects[prim_name] = {}
-
-            mesh_obj = MeshObject(prim_name)
-            self._mesh_objects[prim_name][i] = mesh_obj
-            print(f"{mesh_obj.name} contains {attr.data_count} primitive(s)")
+            primitives = []
+            result.append(HSFAttributes(prim_name, primitives))
 
             self._fl.seek(ofs + attr.data_offset)
-            for j in range(attr.data_count):
-                primitive_type = PrimitiveObject.PrimitiveType(self._parse_short())
-                material = self._parse_short() & 0xFF
-                prim_obj = PrimitiveObject(primitive_type, material)
-                self._mesh_objects[prim_name][i].primitives.append(prim_obj)
+            for _ in range(attr.data_count):
+                primitive_type = PrimitiveType(self._parse_short())
+                prim = PrimitiveObject(primitive_type)
+                primitives.append(prim)
+                prim.flags = self._parse_short()
+                prim.material_index = prim.flags & 0xFFF
+                prim.flag_value = prim.flags >> 12
 
-                num_vertices = 3
                 if primitive_type in (
-                    PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE,
-                    PrimitiveObject.PrimitiveType.PRIMITIVE_QUAD,
+                    PrimitiveType.PRIMITIVE_TRIANGLE,
+                    PrimitiveType.PRIMITIVE_QUAD,
                 ):
-                    # NB: For w05_file24.hsf, the primitive_type is always 3
-                    num_vertices = 4
-                elif (
-                    primitive_type
-                    == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP
-                ):
+                    # Triangles have an extra (empty) vertex
+                    prim.vertices = self._parse_array(VertexParser, 4)
+                elif primitive_type == PrimitiveType.PRIMITIVE_TRIANGLE_STRIP:
                     raise NotImplementedError("Cannot parse triangle strips")
-                    num_vertices = self._parse_int()
-                    ofs = self._parse_int()
-                    xxx = self._fl.tell()
-                    self._fl.seek(extra_ofs + ofs * 8, io.SEEK_SET)
-                    vertices = self._parse_array(VertexParser, num_vertices)
-                    self._fl.seek(xxx)
-                    prim_obj.tri_count = len(prim_obj.vertices)
+                    # num_vertices = self._parse_int()
+                    # ofs = self._parse_int()
+                    # xxx = self._fl.tell()
+                    # self._fl.seek(extra_ofs + ofs * 8, io.SEEK_SET)
+                    # vertices = self._parse_array(VertexParser, num_vertices)
+                    # self._fl.seek(xxx)
+                    # prim_obj.tri_count = len(prim_obj.vertices)
 
-                    # ???
-                    # size: length(vertices) + num_vertices + 1
-                    new_vert: list[Vertex] = deepcopy(prim_obj.vertices)
-                    new_vert[3] = new_vert[1]
-                    new_vert += deepcopy(vertices)
-                    prim_obj.vertices = new_vert
+                    # # ???
+                    # # size: length(vertices) + num_vertices + 1
+                    # new_vert: list[Vertex] = deepcopy(prim_obj.vertices)
+                    # new_vert[3] = new_vert[1]
+                    # new_vert += deepcopy(vertices)
+                    # prim_obj.vertices = new_vert
                 else:
-                    raise NotImplementedError(f"Cannot parse {primitive_type.name}")
+                    raise NotImplementedError(f"Cannot parse {primitive_type}")
 
-                prim_obj.vertices = self._parse_array(VertexParser, num_vertices)
-                prim_obj.unk = (self._parse_int(), self._parse_int(), self._parse_int())
+                prim.nbt_data = (
+                    self._parse_int(),
+                    self._parse_int(),
+                    self._parse_int(),
+                )
+        return result
 
     def _parse_positions(self, headers: list[AttributeHeader]):
         """TODO"""
         start_ofs = self._fl.tell()
-        for i, attr in enumerate(headers):
-            ofs = self._fl.seek(start_ofs + attr.data_offset)
+        result: list[HSFAttributes[tuple[float, float, float]]] = []
+        for attr in headers:
+            name = self._parse_from_stringtable(attr.string_offset, -1)
             positions: list[tuple[float, float, float]] = []
-            for j in range(attr.data_count):
+            result.append(HSFAttributes(name, positions))
+
+            self._fl.seek(start_ofs + attr.data_offset)
+            for _ in range(attr.data_count):
                 positions.append(
                     # Parses raw bytes in Metanoia, instead of floats
                     (self._parse_float(), self._parse_float(), self._parse_float())
                 )
-                # print(f"{positions[i]}")
-
-            name = self._parse_from_stringtable(attr.string_offset, -1)
-            # print(name)
-            if name not in self._mesh_objects:
-                self.logger.warning(
-                    f"{name} was not present in self._mesh_objects, but some (vertex) positions referenced it!"
-                )
-                raise ValueError()
-                self._mesh_objects[name] = MeshObject(name)
-            self._mesh_objects[name][i].positions += positions
-            # print(f"Parsed {len(positions)} (vertex) positions for mesh {name}")
+        return result
 
     def _parse_normals(self, headers: list[AttributeHeader]):
         """TODO"""
@@ -310,6 +324,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
     def _parse_uvs(self, headers: list[AttributeHeader]):
         start_ofs = self._fl.tell()
+        return
 
         for i, attr in enumerate(headers):
             ofs = self._fl.seek(start_ofs + attr.data_offset)
@@ -329,11 +344,16 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 )
                 raise ValueError()
                 self._mesh_objects[name] = MeshObject(name)
-            if i not in self._mesh_objects[name]:
-                # TODO
-                logger.warning("oh noes!")
-            else:
-                self._mesh_objects[name][i].uvs += uv_coords
+            # if i not in self._mesh_objects[name]:
+            #     # TODO
+            #     print(
+            #         f"Wanted _mesh_objects[{name}][{i}], but only the following exist: {self._mesh_objects[name].keys()}"
+            #     )
+            #     # logger.warning("oh noes!")
+            #     # raise ValueError()
+            # else:
+            #     print(f"Successfully fetched _mesh_objects[{name}][{i}]")
+            #     self._mesh_objects[name][i].uvs += uv_coords
             # print(f"Parsed {len(uv_coords)} (vertex) UV's for mesh {name}")
 
     def _parse_textures(self):
@@ -409,36 +429,88 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             if bitmap is not None:
                 self._textures.append((tex_name, bitmap))
 
-    def _parse_bones(self):
+    def _parse_nodes(self):
         """TODO"""
-        bone_len = self._header.bones.length
-        print(f"Identified {bone_len} bone(s)")
-        for i in range(bone_len):
-            str_ofs = self._parse_int()
-            name = self._parse_from_stringtable(str_ofs, -1)
+        node_len = self._header.nodes.length
+        nodes: list[HSFNode] = []
+        for _ in range(node_len):
+            nodes.append(HSFNode(HSFNodeParser(self._fl, self._header).parse()))
+        return nodes
 
-            bone = BoneObject(name)
-            self._bones.append(bone)
-            bone.type = self._parse_int()
-            self._fl.seek(0x08, io.SEEK_CUR)  # ???
-            bone.parent_index = self._parse_int()
-            if bone.parent_index < 0 and bone.parent_index != -1:
-                bone.parent_index = -1
-                raise ValueError(f"Bone's parent_index negative: {bone.parent_index}")
+    def _setup_node_references(self, node: HSFNode):
+        """
+        Ties all node index references to related objects.
+        Requires the following to be set:
+        - `self._nodes`
+        - `self._primitives`
+        - `self._positions`
+        - `self._uvs`
+        """
+        if node.node_data.type == HSFNodeType.MESH:
+            self._setup_mesh_references(node)
 
-            self._fl.seek(0x08, io.SEEK_CUR)  # ???
-            bone.position = (
-                self._parse_float(),
-                self._parse_float(),
-                self._parse_float(),
-            )
-            bone.rotation = (
-                self._parse_float(),
-                self._parse_float(),
-                self._parse_float(),
-            )
-            bone.scale = (self._parse_float(), self._parse_float(), self._parse_float())
+        if not node.has_hierarchy:
+            # Cameras and Lights don't have parents/children
+            return
 
-            self._fl.seek(0xD4, io.SEEK_CUR)  # ???
-            bone.material_index = self._parse_int()
-            self._fl.seek(0x2C, io.SEEK_CUR)  # ???
+        # Set easy access to parent
+        if node.node_data.parent_index != -1:
+            node.parent = self._nodes[node.node_data.parent_index]
+        else:
+            self._root_node = node
+
+        # Children are listed directly after the parent in the symbol indices
+        for i in range(node.node_data.children_count):
+            child_index = self._symbols[node.node_data.symbol_index + i]
+            child = self._nodes[child_index]
+            node.children.append(child)
+
+    def _setup_mesh_references(self, node: HSFNode):
+        """TODO"""
+        primitives_index = node.node_data.primitives_index
+        assert (
+            primitives_index != -1
+        ), f"Expected primitives to be present for node {node}"
+        primitives = self._primitives[primitives_index]
+
+        positions_index = node.node_data.positions_index
+        assert (
+            positions_index != -1
+        ), f"Expected positions to be present for node {node}"
+        positions = self._positions[positions_index]
+
+        uv_index = node.node_data.uv_index
+        # UVs may not be present
+        if uv_index != -1:
+            pass
+        # uv_indices = self._uvs[uv_index]
+
+        # print(node.node_data.type.name, primitives_index, positions_index, uv_index)
+
+        # Yet another sanity check. TODO: move
+        expected_name = primitives.name
+        for attributes in (positions,):
+            assert (
+                attributes.name == expected_name
+            ), f"Encountered a name difference {attributes.name} vs {expected_name}"
+
+        node.mesh_data = MeshObject(expected_name)
+        node.mesh_data.primitives = primitives.data
+        node.mesh_data.positions = positions.data
+
+    def _verify_node_references(self, node: HSFNode):
+        """Verifies that referenced indices are set up correctly. This is just a sanity check."""
+        # If a node has a parent, the node a child of its parent
+        if node.parent is not None:
+            assert (
+                node in node.parent.children
+            ), "Node has a parent, but isn't a child of that parent"
+        elif node.has_hierarchy:
+            assert (
+                node == self._root_node
+            ), f"Node ({node}) has no parent, but isn't the root node: {self._root_node})"
+        # All children have their parent correctly set
+        for child in node.children:
+            assert (
+                child.parent == node
+            ), "Node has children, but isn't a parent for one of them"

@@ -44,9 +44,20 @@ class HSFParserBase(Generic[T]):
             self._fl.read(size), byteorder=self._byteorder, signed=signed
         )
 
+    def _parse_index(self) -> int:
+        """Parse an index. 0xffffffff is parsed as -1"""
+        res = self._parse_int()
+        if res == 0xFFFFFFFF:
+            return -1
+        return res
+
     def _parse_short(self, signed=False) -> int:
         """Parses a short"""
         return self._parse_int(size=2, signed=signed)
+
+    def _parse_byte(self, signed=False) -> int:
+        """Parses a byte"""
+        return self._parse_int(size=1, signed=signed)
 
     def _parse_float(self, size=4) -> int:
         """Parses a float"""

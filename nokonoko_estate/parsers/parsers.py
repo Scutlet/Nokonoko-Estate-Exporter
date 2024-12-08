@@ -5,8 +5,11 @@ from nokonoko_estate.formats.formats import (
     AttrTransform,
     AttributeHeader,
     HSFHeader,
+    HSFNodeData,
+    HSFNodeType,
     MaterialObject,
     AttributeObject,
+    NodeTransform,
     PaletteInfo,
     TextureInfo,
     Vertex,
@@ -49,8 +52,9 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
         header.primitives.offset = self._parse_int()
         header.primitives.length = self._parse_int()
 
-        header.bones.offset = self._parse_int()
-        header.bones.length = self._parse_int()
+        # Bones/nodes tie everything together
+        header.nodes.offset = self._parse_int()
+        header.nodes.length = self._parse_int()
 
         header.textures.offset = self._parse_int()
         header.textures.length = self._parse_int()
@@ -87,6 +91,72 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
         header.stringtable.length = self._parse_int()
 
         return header
+
+
+class HSFNodeParser(HSFParserBase[HSFNodeData]):
+    """Parses XXX"""
+
+    _data_type = HSFNodeData
+
+    def parse(self) -> HSFNodeData:
+        str_ofs = self._parse_int()
+        name = self._parse_from_stringtable(str_ofs, -1)
+
+        node_data = HSFNodeData(name)
+        node_data.type = HSFNodeType(self._parse_int())
+        # print(f"> {name or '<empty>'} ({node_data.type.name})")
+        node_data.const_data_ofs = self._parse_int()
+        node_data.render_flags = self._parse_int()
+
+        node_data.parent_index = self._parse_index()
+        node_data.children_count = self._parse_int()
+        node_data.symbol_index = self._parse_index()
+        node_data.base_transform = NodeTransform(
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+        )
+        node_data.current_transform = NodeTransform(
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+        )
+        node_data.cull_box_min = (
+            self._parse_float(),
+            self._parse_float(),
+            self._parse_float(),
+        )
+        node_data.cull_box_max = (
+            self._parse_float(),
+            self._parse_float(),
+            self._parse_float(),
+        )
+        node_data.base_morph = self._parse_float()
+        node_data.morph_weights = self._fl.read(0x20 * 4)
+
+        node_data.unk_index = self._parse_index()
+        node_data.primitives_index = self._parse_index()
+        node_data.positions_index = self._parse_index()
+        node_data.nrm_index = self._parse_index()
+        node_data.color_index = self._parse_index()
+        # 0xd4
+        node_data.uv_index = self._parse_index()
+
+        node_data.material_data_ofs = self._parse_int()
+        node_data.attribute_index = self._parse_index()  # Materials
+        node_data.unk02 = self._parse_byte()  # byte
+        node_data.unk03 = self._parse_byte()  # byte
+        node_data.shape_type = self._parse_byte()  # byte
+        node_data.unk04 = self._parse_byte()  # byte
+        node_data.shape_count = self._parse_int()
+        node_data.shape_symbol_index = self._parse_index()
+        node_data.cluster_count = self._parse_int()
+        node_data.cluster_symbol_index = self._parse_index()
+        node_data.cenv_count = self._parse_int()
+        node_data.cenv_index = self._parse_index()
+        node_data.cluster_position_ofs = self._parse_int()
+        node_data.cluster_nrm_ofs = self._parse_int()
+        return node_data
 
 
 class AttributeHeaderParser(HSFParserBase[AttributeHeader]):

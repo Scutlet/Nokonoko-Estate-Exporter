@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from io import BufferedReader
 import struct
-from typing import ClassVar, Self
+from typing import ClassVar, Generic, Optional, Self, TypeVar
 
 from PIL import Image
 
@@ -17,9 +17,12 @@ class HSFData:
 
 @dataclass
 class HSFTable:
-    """`offset` is relative to the start of the HSF file. `size` in number of items."""
+    """
+    `offset` is relative to the start of the HSF file. `size` in number of items.
+    If `offset` is zero, then the data is absent
+    """
 
-    offset: int = -1
+    offset: int = 0
     length: int = 0
 
 
@@ -27,11 +30,10 @@ class HSFTable:
 class HSFFile:
     """HSF File"""
 
-    mesh_objects: dict[str, dict[int, "MeshObject"]] = field(default_factory=dict)
+    nodes: list["HSFNode"] = field(default_factory=list)
     textures: list[tuple[str, Image.Image]] = field(default_factory=list)
-    bones: list["BoneObject"] = field(default_factory=list)
-    materials_1: list["MaterialObject"] = field(default_factory=list)
-    materials: list["AttributeObject"] = field(default_factory=list)
+    materials: list["MaterialObject"] = field(default_factory=list)
+    attributes: list["AttributeObject"] = field(default_factory=list)
 
 
 @dataclass
@@ -47,11 +49,11 @@ class HSFHeader:
     normals: HSFTable = field(default_factory=HSFTable)
     uvs: HSFTable = field(default_factory=HSFTable)
     primitives: HSFTable = field(default_factory=HSFTable)
-    bones: HSFTable = field(default_factory=HSFTable)
+    nodes: HSFTable = field(default_factory=HSFTable)
     textures: HSFTable = field(default_factory=HSFTable)
     palettes: HSFTable = field(default_factory=HSFTable)
     motions: HSFTable = field(default_factory=HSFTable)
-    rigs: HSFTable = field(default_factory=HSFTable)
+    rigs: HSFTable = field(default_factory=HSFTable)  # cenv
     skeletons: HSFTable = field(default_factory=HSFTable)
 
     # Unused data
@@ -61,9 +63,9 @@ class HSFHeader:
     map_attributes: HSFTable = field(default_factory=HSFTable)
     # end
 
-    stringtable: HSFTable = field(default_factory=HSFTable)
     matrices: HSFTable = field(default_factory=HSFTable)
     symbols: HSFTable = field(default_factory=HSFTable)
+    stringtable: HSFTable = field(default_factory=HSFTable)
 
 
 @dataclass
@@ -154,6 +156,17 @@ class RiggingMultiWeight(HSFData):
 
 
 ################
+T = TypeVar("T", bound=HSFData)
+
+
+@dataclass
+class HSFAttributes(Generic[T]):
+    """
+    A named list of HSF attributes
+    """
+
+    name: str
+    data: list[T] = field(default_factory=list)
 
 
 @dataclass
@@ -163,22 +176,25 @@ class PrimitiveObject(HSFData):
     """
 
     class PrimitiveType(Enum):
-        PRIMITIVE_0 = 0
-        PRIMITIVE_1 = 1
         PRIMITIVE_TRIANGLE = 2
         PRIMITIVE_QUAD = 3
         PRIMITIVE_TRIANGLE_STRIP = 4
 
     primitive_type: PrimitiveType
-    material: int
+    flags: int = 0
     vertices: list[Vertex] = field(default_factory=list)
-    unk: list[tuple[int, int, int]] = field(default_factory=list)
-    tri_count: int = 0
+    tri_count: int = 0  # only used for triangle strips
+    nbt_data: tuple[int, int, int] = field(default_factory=lambda: (0, 0, 0))
+
+    # Calculated based on flags
+    material_index: int = -1
+    flag_value: int = 8
 
 
 @dataclass
 class MeshObject(HSFData):
     """TODO
+    This is a placeholder class that ties everything together
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -189,7 +205,9 @@ class MeshObject(HSFData):
     uvs: list[tuple[int, int]] = field(default_factory=list)
     colors: list[tuple[int, int, int, int]] = field(default_factory=list)
 
+    # Triangles, quads, etc.
     primitives: list[PrimitiveObject] = field(default_factory=list)
+
     single_binds: list[RiggingSingleBind] = field(default_factory=list)
     rigging_double_binds: list[RiggingDoubleBind] = field(default_factory=list)
     multi_binds: list[RiggingMultiBind] = field(default_factory=list)
@@ -197,19 +215,111 @@ class MeshObject(HSFData):
     multi_weights: list[RiggingMultiWeight] = field(default_factory=list)
 
 
+class HSFNodeType(Enum):
+    """Type of object"""
+
+    NULL1 = 0
+    REPLICA = 1
+    MESH = 2
+    ROOT = 3
+    JOINT = 4
+    EFFECT = 5
+    CAMERA = 7
+    LIGHT = 8
+    MAP = 9
+
+
 @dataclass
-class BoneObject(HSFData):
+class NodeTransform:
+    """TODO
+    See: MPLibrary.GCN.Transform
+    """
+
+    position: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+    rotation: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+    scale: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
+
+
+@dataclass
+class HSFNode:
+    """TODO"""
+
+    node_data: "HSFNodeData"
+    # light_data TODO
+    # camera_data TODO
+
+    parent: Optional["HSFNode"] = None
+    children: list["HSFNode"] = field(default_factory=list)
+
+    mesh_data: MeshObject = None  # If HSFNodeData.type == MESH
+    # TODO: envelopes, clusters, shapes
+
+    @property
+    def has_hierarchy(self):
+        """Whether this node can have children"""
+        return self.node_data.type not in (HSFNodeType.LIGHT, HSFNodeType.CAMERA)
+
+    def __str__(self):
+        parent_name = "<None>"
+        if self.parent is not None:
+            parent_name = f'HSFObject[{self.parent.node_data.type.name}, "{self.parent.node_data.name}"]'
+        return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", parent={parent_name}, children={len(self.children)}]'
+
+
+@dataclass
+class HSFNodeData(HSFData):
     """TODO
     See (NodeObject): https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
+    See: MPLibrary.GCN.HSFObject
     """
 
     name: str
+    type: HSFNodeType = HSFNodeType.NULL1
+    const_data_ofs: int = -1
+    render_flags: int = 0
+
+    # TODO: Camera data/light data. MPLibrary.GCN.HSFObject.Read
+    # TODO: Stuff below isn't used for Camera/lights
     parent_index: int = -1
-    type: int = 0
-    material_index: int = 0
-    position: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
-    rotation: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
-    scale: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
+    children_count: int = 0
+    symbol_index: int = -1
+
+    base_transform: NodeTransform = field(default_factory=NodeTransform)
+    current_transform: NodeTransform = field(default_factory=NodeTransform)
+
+    cull_box_min: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
+    cull_box_max: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
+
+    # fmt: off
+    base_morph: float = 0.0
+    morph_weights: tuple[float, float, float, float, float, float, float, float,
+                         float, float, float, float, float, float, float, float,
+                         float, float, float, float, float, float, float, float,
+                         float, float, float, float, float, float, float, float] = (
+        field(default_factory=lambda: tuple(0.0 for _ in range(0x20)))
+    )
+    # fmt: on
+
+    unk_index: int = -1
+    primitives_index: int = -1  # Faces
+    positions_index: int = -1  # Vertices
+    nrm_index: int = -1
+    color_index: int = -1
+    uv_index: int = -1
+    material_data_ofs: int = 0
+    attribute_index: int = -1  # Materials
+    unk02: int = 0  # byte
+    unk03: int = 0  # byte
+    shape_type: int = 0  # byte
+    unk04: int = 0  # byte
+    shape_count: int = 0
+    shape_symbol_index: int = -1
+    cluster_count: int = 0
+    cluster_symbol_index: int = -1
+    cenv_count: int = 0
+    cenv_index: int = -1
+    cluster_position_ofs: int = -1
+    cluster_nrm_ofs: int = -1
 
 
 @dataclass

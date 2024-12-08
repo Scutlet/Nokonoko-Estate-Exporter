@@ -8,6 +8,7 @@ from nokonoko_estate.formats.enums import WrapMode
 from nokonoko_estate.formats.formats import (
     HSFFile,
     AttributeObject,
+    HSFNodeType,
     MeshObject,
     PrimitiveObject,
 )
@@ -49,19 +50,22 @@ class HSFFileDAESerializer:
         # Materials & Effects
         library_materials = ET.SubElement(root, "library_materials")
         library_effects = ET.SubElement(root, "library_effects")
-        for i, mat in enumerate(self._data.materials):
+        for i, mat in enumerate(self._data.attributes):
             library_materials.append(self.serialize_material(mat, i))
             library_effects.append(self.serialize_effects(mat, i))
 
         # Geometry
         geometries = ET.SubElement(root, "library_geometries")
-        for mesh_objs in self._data.mesh_objects.values():
-            for i, mesh_obj in mesh_objs.items():
-                if EXPORT_ALL or (
-                    "w05_file0.dae" not in self.output_path
-                    or mesh_obj.name in MESH_WHITELIST
-                ):
-                    geometries.append(self.serialize_geometry(mesh_obj, i))
+        for i, node in enumerate(
+            filter(
+                lambda node: node.node_data.type == HSFNodeType.MESH, self._data.nodes
+            )
+        ):
+            if EXPORT_ALL or (
+                "w05_file0.dae" not in self.output_path
+                or node.mesh_data.name in MESH_WHITELIST
+            ):
+                geometries.append(self.serialize_geometry(node.mesh_data, i))
 
         # Controller
         asset = ET.SubElement(root, "library_controllers")
@@ -71,14 +75,17 @@ class HSFFileDAESerializer:
         visual_scene = ET.SubElement(
             visual_scenes, "visual_scene", id="Scene", name="Scene"
         )
-        for mesh_objs in self._data.mesh_objects.values():
-            for i, mesh_obj in mesh_objs.items():
-                # Add all meshes to the scene
-                if EXPORT_ALL or (
-                    "w05_file0.dae" not in self.output_path
-                    or mesh_obj.name in MESH_WHITELIST
-                ):
-                    visual_scene.append(self.serialize_visual_scene(mesh_obj, i))
+        for i, node in enumerate(
+            filter(
+                lambda node: node.node_data.type == HSFNodeType.MESH, self._data.nodes
+            )
+        ):
+            # Add all meshes to the scene
+            if EXPORT_ALL or (
+                "w05_file0.dae" not in self.output_path
+                or node.mesh_data.name in MESH_WHITELIST
+            ):
+                visual_scene.append(self.serialize_visual_scene(node.mesh_data, i))
 
         # Scene
         scene = ET.SubElement(root, "scene")
@@ -175,16 +182,23 @@ class HSFFileDAESerializer:
 
         # These index the mesh vertices
         #   TODO: Assumes that all primitives in the mesh use the same material -> might be wrong
+        my_mat = mesh_obj.primitives[0].material_index
+        for x in mesh_obj.primitives:
+            if x.material_index != my_mat:
+                raise ValueError(
+                    "A primitive in the MeshObj used a different material!"
+                )
+
         polygons = ET.SubElement(
             mesh,
             "polylist",
-            material=f"material_{mesh_obj.primitives[0].material:03}",
+            material=f"material_{mesh_obj.primitives[0].material_index:03}",
             count="1",
         )
         triangles = ET.SubElement(
             mesh,
             "triangles",
-            material=f"material_{mesh_obj.primitives[0].material:03}",
+            material=f"material_{mesh_obj.primitives[0].material_index:03}",
             count="1",
         )
 
@@ -229,13 +243,13 @@ class HSFFileDAESerializer:
 
         return geometry
 
-    def _serialize_inputs(self, mesh_obj_name: str) -> list[ET.Element]:
+    def _serialize_inputs(self, mesh_obj_uid: str) -> list[ET.Element]:
         """TODO"""
         return [
             ET.Element(
                 "input",
                 semantic="VERTEX",
-                source=f"#{mesh_obj_name}-vertex",
+                source=f"#{mesh_obj_uid}-vertex",
                 offset="0",
             ),
             # TODO: NORMAL
@@ -350,7 +364,7 @@ class HSFFileDAESerializer:
 
         bind_material = ET.SubElement(geo, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
-        mat_index = mesh_obj.primitives[0].material
+        mat_index = mesh_obj.primitives[0].material_index
         instance_material = ET.SubElement(
             technique,
             "instance_material",
