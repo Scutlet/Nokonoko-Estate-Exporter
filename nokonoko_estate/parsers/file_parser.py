@@ -458,23 +458,35 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
     def _setup_mesh_references(self, node: HSFNode):
         """TODO"""
+        # Primitives
         primitives_index = node.node_data.primitives_index
         assert (
             primitives_index != -1
         ), f"Expected primitives to be present for node {node}"
         primitives = self._primitives[primitives_index]
 
+        # Positions
         positions_index = node.node_data.positions_index
         assert (
             positions_index != -1
         ), f"Expected positions to be present for node {node}"
         positions = self._positions[positions_index]
 
+        # UV coords
         uv_index = node.node_data.uv_index
         # UVs may not be present
         uv_indices_data = []
         if uv_index != -1:
             uv_indices_data = self._uvs[uv_index].data
+
+        # Vertex Colors
+        # TODO
+
+        # Attributes
+        attribute_index = node.node_data.attribute_index
+        attribute = None
+        if attribute_index != -1:
+            attribute = self._attributes[attribute_index]
 
         # print(node.node_data.type.name, primitives_index, positions_index, uv_index)
 
@@ -489,6 +501,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         node.mesh_data.primitives = primitives.data
         node.mesh_data.positions = positions.data
         node.mesh_data.uvs = uv_indices_data
+        node.attribute = attribute
 
     def _verify_node_references(self, node: HSFNode):
         """Verifies that referenced indices are set up correctly. This is just a sanity check."""

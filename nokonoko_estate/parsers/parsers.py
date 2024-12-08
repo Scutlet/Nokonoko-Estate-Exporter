@@ -180,15 +180,16 @@ class AttributeParser(HSFParserBase[AttributeObject]):
     _data_type = AttributeObject
 
     def parse(self) -> AttributeObject:
-        name_offset = self._parse_int()
-        obj = AttributeObject(name_offset)
+        str_ofs = self._parse_index()
+        name = None
+        if str_ofs != -1:
+            name = self._parse_from_stringtable(str_ofs, -1)
+        obj = AttributeObject(name)
 
         obj.tex_animation_offset = self._parse_index()
         obj.unk_1 = self._parse_short()
-        try:
-            obj.blend_flag = CombinerBlend(self._parse_index(0x1))
-        except ValueError:
-            pass
+        obj.blend_flag = CombinerBlend(self._parse_index(0x1))
+
         obj.alpha_flag = bool(self._parse_int(0x1))
         obj.blend_texture_alpha = self._parse_float()
         obj.unk_2 = self._parse_int()
@@ -211,23 +212,16 @@ class AttributeParser(HSFParserBase[AttributeObject]):
         obj.unk_8 = self._parse_float()
         obj.unk_9 = self._parse_float()
 
-        try:
-            obj.wrap_s = WrapMode(self._parse_int(signed=True))
-        except ValueError:
-            pass
-        try:
-            obj.wrap_t = WrapMode(self._parse_int(signed=True))
-        except ValueError:
-            pass
+        obj.wrap_s = WrapMode(self._parse_int(signed=True))
+        obj.wrap_t = WrapMode(self._parse_int(signed=True))
 
         obj.unk_10 = self._parse_int()
         obj.unk_11 = self._parse_int()
         obj.unk_12 = self._parse_int()
 
         obj.mipmap_max_lod = self._parse_int(signed=True)
-        obj.texture_index = self._parse_int(signed=True)
-
-        # print(f"End reading attribute data: {self._fl.tell():#x}")
+        obj.texture_flags = self._parse_int()
+        obj.texture_index = self._parse_index()
 
         return obj
 
@@ -238,8 +232,11 @@ class MaterialObjectParser(HSFParserBase[MaterialObject]):
     _data_type = MaterialObject
 
     def parse(self) -> MaterialObject:
-        name_offset = self._parse_int()
-        mat = MaterialObject(name_offset)
+        str_ofs = self._parse_index()
+        name = None
+        if str_ofs != -1:
+            name = self._parse_from_stringtable(str_ofs, -1)
+        mat = MaterialObject(name)
         mat.unk01 = self._parse_int()
         mat.alt_flags = self._parse_short()
         mat.vertex_mode = LightingChannelFlags(self._parse_byte())

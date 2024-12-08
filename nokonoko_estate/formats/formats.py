@@ -258,6 +258,7 @@ class HSFNode:
     children: list["HSFNode"] = field(default_factory=list)
 
     mesh_data: MeshObject = None  # If HSFNodeData.type == MESH
+    attribute: "AttributeObject" = None
     # TODO: envelopes, clusters, shapes
 
     @property
@@ -312,7 +313,7 @@ class HSFNodeData(HSFData):
     nrm_index: int = -1
     color_index: int = -1
     uv_index: int = -1
-    material_data_ofs: int = 0
+    material_data_ofs: int = 0  # Set at runtime
     attribute_index: int = -1  # Materials
     unk02: int = 0  # byte
     unk03: int = 0  # byte
@@ -324,8 +325,8 @@ class HSFNodeData(HSFData):
     cluster_symbol_index: int = -1
     cenv_count: int = 0
     cenv_index: int = -1
-    cluster_position_ofs: int = -1
-    cluster_nrm_ofs: int = -1
+    cluster_position_ofs: int = 0
+    cluster_nrm_ofs: int = 0
 
 
 class LightingChannelFlags(Enum):
@@ -377,6 +378,7 @@ class AttributeObject(HSFData):
     """
 
     name_offset: int  # uint
+    name: str | None
     tex_animation_offset: int = (
         0  # Replaced with Pointer to Texture Animation at Runtime
     )
@@ -409,7 +411,11 @@ class AttributeObject(HSFData):
     unk_12: int = 0
 
     mipmap_max_lod: int = 1
+    texture_flags: int = 0
     texture_index: int = -1
+
+    def __str__(self):
+        return f"AttributeObject[{self.name}, texture={self.texture_index}]"
 
 
 ##############

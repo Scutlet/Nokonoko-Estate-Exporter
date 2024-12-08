@@ -8,6 +8,7 @@ from nokonoko_estate.formats.enums import WrapMode
 from nokonoko_estate.formats.formats import (
     HSFFile,
     AttributeObject,
+    HSFNode,
     HSFNodeType,
     MeshObject,
     PrimitiveObject,
@@ -16,8 +17,9 @@ from nokonoko_estate.formats.formats import (
 logger = logging.Logger(__name__)
 
 
-EXPORT_ALL = True
+EXPORT_ALL = False
 MESH_WHITELIST = ["obj242", "oudan_all", "yazirusi_all", "obj127"]
+MESH_WHITELIST = ["startdai", "oudan_all"]
 
 
 class HSFFileDAESerializer:
@@ -64,7 +66,7 @@ class HSFFileDAESerializer:
                 "w05_file0.dae" not in self.output_path
                 or node.mesh_data.name in MESH_WHITELIST
             ):
-                geometries.append(self.serialize_geometry(node.mesh_data, i))
+                geometries.append(self.serialize_geometry(node, i))
                 node.node_data.attribute_index
 
         # Controller
@@ -85,7 +87,7 @@ class HSFFileDAESerializer:
                 "w05_file0.dae" not in self.output_path
                 or node.mesh_data.name in MESH_WHITELIST
             ):
-                visual_scene.append(self.serialize_visual_scene(node.mesh_data, i))
+                visual_scene.append(self.serialize_visual_scene(node, i))
 
         # Scene
         scene = ET.SubElement(root, "scene")
@@ -166,8 +168,9 @@ class HSFFileDAESerializer:
 
         return effect
 
-    def serialize_geometry(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
+    def serialize_geometry(self, node: HSFNode, obj_index: int) -> ET.Element:
         """TODO"""
+        mesh_obj = node.mesh_data
         uid = f"{mesh_obj.name}__{obj_index}"
 
         geometry = ET.Element("geometry", id=f"{uid}-mesh", name=uid)
@@ -183,8 +186,11 @@ class HSFFileDAESerializer:
         # These index the mesh vertices
         #   TODO: Assumes that all primitives in the mesh use the same material -> might be wrong
         my_mat = mesh_obj.primitives[0].material_index
+        mat = self._data.materials[my_mat]
+
 
         for x in mesh_obj.primitives:
+            # print(x.material_index)
             if x.material_index != my_mat:
                 logger.warning(
                     f"{x} in {mesh_obj} used a different material: {x.material_index} vs {my_mat}"
@@ -197,13 +203,13 @@ class HSFFileDAESerializer:
         polygons = ET.SubElement(
             mesh,
             "polylist",
-            material=f"material_{mesh_obj.primitives[0].material_index:03}",
+            material=f"material_{mat.first_symbol:03}",
             count="1",
         )
         triangles = ET.SubElement(
             mesh,
             "triangles",
-            material=f"material_{mesh_obj.primitives[0].material_index:03}",
+            material=f"material_{mat.first_symbol:03}",
             count="1",
         )
 
@@ -353,26 +359,28 @@ class HSFFileDAESerializer:
 
         return source
 
-    def serialize_visual_scene(
-        self, mesh_obj: MeshObject, obj_index: int
-    ) -> ET.Element:
+    def serialize_visual_scene(self, node: HSFNode, obj_index: int) -> ET.Element:
         """TODO"""
+        mesh_obj = node.mesh_data
         uid = f"{mesh_obj.name}__{obj_index}"
 
-        node = ET.Element("node", id=uid, name=uid, type="NODE")
-        matrix = ET.SubElement(node, "matrix", sid="transform")
+        xml_node = ET.Element("node", id=uid, name=uid, type="NODE")
+        matrix = ET.SubElement(xml_node, "matrix", sid="transform")
         # ???
         matrix.text = "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"
-        geo = ET.SubElement(node, "instance_geometry", url=f"#{uid}-mesh", name=uid)
+        geo = ET.SubElement(xml_node, "instance_geometry", url=f"#{uid}-mesh", name=uid)
 
         bind_material = ET.SubElement(geo, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
-        mat_index = mesh_obj.primitives[0].material_index
+        material = mesh_obj.primitives[0].material_index
+        attribute_index = self._data.materials[material].first_symbol
+        # print(f"serialize_visual_scene: {attribute_index}")
+        # TODO
         instance_material = ET.SubElement(
             technique,
             "instance_material",
-            symbol=f"material_{mat_index:03}",
-            target=f"#material_{mat_index:03}",
+            symbol=f"material_{attribute_index:03}",
+            target=f"#material_{attribute_index:03}",
         )
 
         # <bind_material>
@@ -381,7 +389,7 @@ class HSFFileDAESerializer:
         #     </technique_common>
         #   </bind_material>
 
-        return node
+        return xml_node
 
         # <node id="stair" name="stair" type="NODE">
         #     <matrix sid="transform">1 0 0 -233.378 0 1 0 -208.1444 0 0 1 786.8199 0 0 0 1</matrix>
