@@ -94,7 +94,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._materials = self._parse_array(
             MaterialObjectParser, self._header.materials.length
         )
-        print(f"Identified {len(self._materials)} Materials")
+        print(f"Identified {len(self._materials)} Material(s)")
 
         # Attributes TODO
         self._fl.seek(self._header.attributes.offset, io.SEEK_SET)
@@ -117,17 +117,20 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             AttributeHeaderParser, self._header.normals.length
         )
         self._parse_normals(normal_headers)
+        # print(f"Identified {len(self.)} normal(s)")
 
         # (Vertex) UV's TODO
         self._fl.seek(self._header.uvs.offset, io.SEEK_SET)
         uv_headers = self._parse_array(AttributeHeaderParser, self._header.uvs.length)
-        self._parse_uvs(uv_headers)
+        self._uvs = self._parse_uvs(uv_headers)
+        print(f"Identified {len(self._uvs)} UV(s)")
 
         # Symbols
         self._fl.seek(self._header.symbols.offset)
         self._symbols = []
         for _ in range(self._header.symbols.length):
             self._symbols.append(self._parse_int(signed=True))
+        print(f"Identified {len(self._symbols)} symbol(s)")
 
         # Nodes (these tie everything together)
         self._fl.seek(self._header.nodes.offset)
@@ -266,7 +269,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 )
         return result
 
-    def _parse_positions(self, headers: list[AttributeHeader]):
+    def _parse_positions(
+        self, headers: list[AttributeHeader]
+    ) -> list[HSFAttributes[tuple[float, float, float]]]:
         """TODO"""
         start_ofs = self._fl.tell()
         result: list[HSFAttributes[tuple[float, float, float]]] = []
@@ -322,39 +327,25 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             self._mesh_objects[name][i].normals += normals
             print(f"Parsed {len(normals)} (vertex) normals for mesh {name}")
 
-    def _parse_uvs(self, headers: list[AttributeHeader]):
+    def _parse_uvs(
+        self, headers: list[AttributeHeader]
+    ) -> list[HSFAttributes[tuple[float, float]]]:
         start_ofs = self._fl.tell()
-        return
 
-        for i, attr in enumerate(headers):
-            ofs = self._fl.seek(start_ofs + attr.data_offset)
-            uv_coords: list[tuple[int, int]] = []
-            for j in range(attr.data_count):
+        result: list[HSFAttributes[tuple[float, float]]] = []
+        for attr in headers:
+            name = self._parse_from_stringtable(attr.string_offset, -1)
+            uv_coords: list[tuple[float, float]] = []
+            result.append(HSFAttributes(name, uv_coords))
+
+            self._fl.seek(start_ofs + attr.data_offset)
+            for _ in range(attr.data_count):
                 uv_coords.append(
                     # Parses raw bytes in Metanoia, instead of floats
                     (self._parse_float(), self._parse_float())
                 )
                 # print(f"{uv_coords[i]}")
-
-            name = self._parse_from_stringtable(attr.string_offset, -1)
-            # print(name)
-            if name not in self._mesh_objects:
-                self.logger.warning(
-                    f"{name} was not present in self._mesh_objects, but some (vertex) UV referenced it!"
-                )
-                raise ValueError()
-                self._mesh_objects[name] = MeshObject(name)
-            # if i not in self._mesh_objects[name]:
-            #     # TODO
-            #     print(
-            #         f"Wanted _mesh_objects[{name}][{i}], but only the following exist: {self._mesh_objects[name].keys()}"
-            #     )
-            #     # logger.warning("oh noes!")
-            #     # raise ValueError()
-            # else:
-            #     print(f"Successfully fetched _mesh_objects[{name}][{i}]")
-            #     self._mesh_objects[name][i].uvs += uv_coords
-            # print(f"Parsed {len(uv_coords)} (vertex) UV's for mesh {name}")
+        return result
 
     def _parse_textures(self):
         """TODO"""
@@ -481,9 +472,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         uv_index = node.node_data.uv_index
         # UVs may not be present
+        uv_indices_data = []
         if uv_index != -1:
-            pass
-        # uv_indices = self._uvs[uv_index]
+            uv_indices_data = self._uvs[uv_index].data
 
         # print(node.node_data.type.name, primitives_index, positions_index, uv_index)
 
@@ -497,6 +488,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         node.mesh_data = MeshObject(expected_name)
         node.mesh_data.primitives = primitives.data
         node.mesh_data.positions = positions.data
+        node.mesh_data.uvs = uv_indices_data
 
     def _verify_node_references(self, node: HSFNode):
         """Verifies that referenced indices are set up correctly. This is just a sanity check."""

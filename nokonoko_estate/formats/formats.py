@@ -190,6 +190,9 @@ class PrimitiveObject(HSFData):
     material_index: int = -1
     flag_value: int = 8
 
+    def __str__(self):
+        return f"PrimitiveObject[{self.primitive_type.name}, vertices={len(self.vertices)}, mat={self.material_index}, tris={self.tri_count}]"
+
 
 @dataclass
 class MeshObject(HSFData):
@@ -213,6 +216,9 @@ class MeshObject(HSFData):
     multi_binds: list[RiggingMultiBind] = field(default_factory=list)
     double_weights: list[RiggingDoubleWeight] = field(default_factory=list)
     multi_weights: list[RiggingMultiWeight] = field(default_factory=list)
+
+    def __str__(self):
+        return f'MeshObject["{self.name}", primitives={len(self.primitives)}, positions={len(self.positions)}, normals={len(self.normals)}, uvs={len(self.uvs)}, colors={len(self.colors)}]'
 
 
 class HSFNodeType(Enum):
@@ -322,6 +328,40 @@ class HSFNodeData(HSFData):
     cluster_nrm_ofs: int = -1
 
 
+class LightingChannelFlags(Enum):
+    NO_LIGHTING = 0  # Flat shading
+    LIGHTING = 1  # Lighting used
+    LIGHTING_SPECULAR = 2  # Second light channel used for specular
+    LIGHTING_SPECULAR_2 = 3  # Same output as LightingSpecular. Not sure if used.
+    VERTEX_ALPHA_ONLY = 4  # Vertex colors but only with alpha
+    VERTEX_COLORS_WITH_ALPH = 5  # Vertex colors + alpha
+
+
+@dataclass
+class MaterialObject(HSFData):  # struct
+    """TODO
+    See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
+    """
+
+    name: str
+    unk01: int = 0
+    alt_flags: int = 0
+    vertex_mode: LightingChannelFlags = LightingChannelFlags.NO_LIGHTING
+    ambient_color: tuple[int, int, int] = field(default_factory=lambda: (0, 0, 0))
+    material_color: tuple[int, int, int] = field(default_factory=lambda: (0, 0, 0))
+    shadow_color: tuple[int, int, int] = field(default_factory=lambda: (0, 0, 0))
+    hi_lite_scale: float = 1.0
+    unk02: float = 0.0
+    transparency_inverted: float = 0.0
+    unk03: float = 0.0
+    unk04: float = 0.0
+    reflection_intensity: float = 1.0
+    unk05: float = 1.0
+    material_flags: int = 0
+    texture_count = 0
+    first_symbol = 0
+
+
 @dataclass
 class AttrTransform:
     """TODO"""
@@ -370,23 +410,6 @@ class AttributeObject(HSFData):
 
     mipmap_max_lod: int = 1
     texture_index: int = -1
-
-
-@dataclass
-class MaterialObject(HSFData):  # struct
-    """TODO
-    See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
-    """
-
-    unk_1: int  # long
-    unk_2: int  # long
-    unk_3: int  # long
-    unk_4: int  # long
-    unk_5: int  # long
-    unk_6: int  # long
-    unk_7: int
-    material_count: int
-    material_index: int
 
 
 ##############

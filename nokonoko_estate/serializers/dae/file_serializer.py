@@ -13,11 +13,10 @@ from nokonoko_estate.formats.formats import (
     PrimitiveObject,
 )
 
-
 logger = logging.Logger(__name__)
 
 
-EXPORT_ALL = False
+EXPORT_ALL = True
 MESH_WHITELIST = ["obj242", "oudan_all", "yazirusi_all", "obj127"]
 
 
@@ -66,6 +65,7 @@ class HSFFileDAESerializer:
                 or node.mesh_data.name in MESH_WHITELIST
             ):
                 geometries.append(self.serialize_geometry(node.mesh_data, i))
+                node.node_data.attribute_index
 
         # Controller
         asset = ET.SubElement(root, "library_controllers")
@@ -183,11 +183,16 @@ class HSFFileDAESerializer:
         # These index the mesh vertices
         #   TODO: Assumes that all primitives in the mesh use the same material -> might be wrong
         my_mat = mesh_obj.primitives[0].material_index
+
         for x in mesh_obj.primitives:
             if x.material_index != my_mat:
-                raise ValueError(
-                    "A primitive in the MeshObj used a different material!"
+                logger.warning(
+                    f"{x} in {mesh_obj} used a different material: {x.material_index} vs {my_mat}"
                 )
+                # raise ValueError(
+                #     "A primitive in the MeshObj used a different material!"
+                # )
+                break
 
         polygons = ET.SubElement(
             mesh,
@@ -214,12 +219,10 @@ class HSFFileDAESerializer:
         p_tri_elems: list[str] = []
         p_poly_elems: list[str] = []
 
-        print(uid)
-        print(f"> {len(mesh_obj.primitives)}")
-
         for primitive in mesh_obj.primitives:
             match primitive.primitive_type:
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE:
+                    # TODO: Fix attempted uv reading if there are no uv-coordinates
                     p_tri_elems += self.serialize_primitive_triangle(primitive)
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_QUAD:
                     vcount_poly_elems.append("4")
@@ -253,12 +256,12 @@ class HSFFileDAESerializer:
                 offset="0",
             ),
             # TODO: NORMAL
-            # ET.Element(
-            #     "input",
-            #     semantic="TEXCOORD",
-            #     source=f"#{mesh_obj_name}-texcoord",
-            #     offset="1",  # 2
-            # ),
+            ET.Element(
+                "input",
+                semantic="TEXCOORD",
+                source=f"#{mesh_obj_uid}-texcoord",
+                offset="1",  # 2
+            ),
             # TODO: COLOR
         ]
 
@@ -271,11 +274,11 @@ class HSFFileDAESerializer:
         # The fourth primitive is a dummy and always references the first element in each array (position, normal, color, uv)
         return [
             str(primitive.vertices[0].position_index),
-            # str(primitive.vertices[0].uv_index),
+            str(primitive.vertices[0].uv_index),
             str(primitive.vertices[1].position_index),
-            # str(primitive.vertices[1].uv_index),
+            str(primitive.vertices[1].uv_index),
             str(primitive.vertices[2].position_index),
-            # str(primitive.vertices[2].uv_index),
+            str(primitive.vertices[2].uv_index),
         ]
 
     def serialize_primitive_quad(self, primitive: PrimitiveObject) -> list[str]:
@@ -285,13 +288,13 @@ class HSFFileDAESerializer:
         # Order in HSF-file: 0 1 3 2
         return [
             str(primitive.vertices[0].position_index),
-            # str(primitive.vertices[0].uv_index),
+            str(primitive.vertices[0].uv_index),
             str(primitive.vertices[1].position_index),
-            # str(primitive.vertices[1].uv_index),
+            str(primitive.vertices[1].uv_index),
             str(primitive.vertices[3].position_index),
-            # str(primitive.vertices[3].uv_index),
+            str(primitive.vertices[3].uv_index),
             str(primitive.vertices[2].position_index),
-            # str(primitive.vertices[2].uv_index),
+            str(primitive.vertices[2].uv_index),
         ]
 
     def serialize_positions(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:

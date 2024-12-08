@@ -7,6 +7,7 @@ from nokonoko_estate.formats.formats import (
     HSFHeader,
     HSFNodeData,
     HSFNodeType,
+    LightingChannelFlags,
     MaterialObject,
     AttributeObject,
     NodeTransform,
@@ -179,13 +180,13 @@ class AttributeParser(HSFParserBase[AttributeObject]):
     _data_type = AttributeObject
 
     def parse(self) -> AttributeObject:
-        name_offset = self._parse_int(signed=True)
+        name_offset = self._parse_int()
         obj = AttributeObject(name_offset)
 
-        obj.tex_animation_offset = self._parse_int(signed=True)
+        obj.tex_animation_offset = self._parse_index()
         obj.unk_1 = self._parse_short()
         try:
-            obj.blend_flag = CombinerBlend(self._parse_int(0x1, signed=True))
+            obj.blend_flag = CombinerBlend(self._parse_index(0x1))
         except ValueError:
             pass
         obj.alpha_flag = bool(self._parse_int(0x1))
@@ -235,7 +236,32 @@ class MaterialObjectParser(HSFParserBase[MaterialObject]):
     """TODO"""
 
     _data_type = MaterialObject
-    struct_formatting = ">lllllliii"
+
+    def parse(self) -> MaterialObject:
+        name_offset = self._parse_int()
+        mat = MaterialObject(name_offset)
+        mat.unk01 = self._parse_int()
+        mat.alt_flags = self._parse_short()
+        mat.vertex_mode = LightingChannelFlags(self._parse_byte())
+        mat.ambient_color = (self._parse_byte(), self._parse_byte(), self._parse_byte())
+        mat.material_color = (
+            self._parse_byte(),
+            self._parse_byte(),
+            self._parse_byte(),
+        )
+        mat.shadow_color = (self._parse_byte(), self._parse_byte(), self._parse_byte())
+        mat.hi_lite_scale = self._parse_float()
+        mat.unk02 = self._parse_float()
+        mat.transparency_inverted = self._parse_float()
+        mat.unk03 = self._parse_float()
+        mat.unk04 = self._parse_float()
+        mat.reflection_intensity = self._parse_float()
+        mat.unk05 = self._parse_float()
+        mat.material_flags = self._parse_int()
+        mat.texture_count = self._parse_int()
+        mat.first_symbol = self._parse_int()
+
+        return mat
 
 
 class TextureInfoParser(HSFParserBase[TextureInfo]):
