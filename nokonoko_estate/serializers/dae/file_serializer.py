@@ -355,6 +355,17 @@ class HSFFileDAESerializer:
 
         return source
 
+    def _serialize_transformation_matrix(self, node: HSFNode) -> str:
+        """TODO"""
+        transform = node.node_data.base_transform
+        # fmt: off
+        return (str(transform.scale[0]) + " 0 0 " + str(transform.position[0])
+                + " 0 " + str(transform.scale[1]) + " 0 " + str(transform.position[1])
+                + " 0 0 " + str(transform.scale[2]) + " " + str(transform.position[2])
+                + " 0 0 0 1"
+                )
+        # fmt: on
+
     def serialize_visual_scene(self, node: HSFNode, obj_index: int) -> ET.Element:
         """TODO"""
         mesh_obj = node.mesh_data
@@ -363,7 +374,10 @@ class HSFFileDAESerializer:
         xml_node = ET.Element("node", id=uid, name=uid, type="NODE")
         matrix = ET.SubElement(xml_node, "matrix", sid="transform")
         # ???
-        matrix.text = "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"
+        # A list of 16 floating-point values. These values are organized into a 4-by-4
+        #   column-order matrix suitable for matrix composition.
+        matrix.text = self._serialize_transformation_matrix(node)
+        # matrix.text = "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"
         geo = ET.SubElement(xml_node, "instance_geometry", url=f"#{uid}-mesh", name=uid)
         bind_material = ET.SubElement(geo, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
