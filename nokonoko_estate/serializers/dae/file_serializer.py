@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime
 import logging
 import xml.etree.ElementTree as ET
@@ -17,7 +18,7 @@ from nokonoko_estate.formats.formats import (
 logger = logging.Logger(__name__)
 
 
-EXPORT_ALL = False
+EXPORT_ALL = True
 MESH_WHITELIST = ["obj242", "oudan_all", "yazirusi_all", "obj127"]
 MESH_WHITELIST = ["startdai", "oudan_all"]
 
@@ -183,74 +184,68 @@ class HSFFileDAESerializer:
         vertices = ET.SubElement(mesh, "vertices", id=f"{uid}-vertex")
         ET.SubElement(vertices, "input", semantic="POSITION", source=f"#{uid}-position")
 
-        # These index the mesh vertices
-        #   TODO: Assumes that all primitives in the mesh use the same material -> might be wrong
-        my_mat = mesh_obj.primitives[0].material_index
-        mat = self._data.materials[my_mat]
-
-
-        for x in mesh_obj.primitives:
-            # print(x.material_index)
-            if x.material_index != my_mat:
-                logger.warning(
-                    f"{x} in {mesh_obj} used a different material: {x.material_index} vs {my_mat}"
-                )
-                # raise ValueError(
-                #     "A primitive in the MeshObj used a different material!"
-                # )
-                break
-
-        polygons = ET.SubElement(
-            mesh,
-            "polylist",
-            material=f"material_{mat.first_symbol:03}",
-            count="1",
-        )
-        triangles = ET.SubElement(
-            mesh,
-            "triangles",
-            material=f"material_{mat.first_symbol:03}",
-            count="1",
-        )
-
-        for poly in self._serialize_inputs(uid):
-            polygons.append(poly)
-            triangles.append(poly)
-
-        vcount_poly = ET.SubElement(polygons, "vcount")
-        p_tri = ET.SubElement(triangles, "p")
-        p_poly = ET.SubElement(polygons, "p")
-
-        vcount_poly_elems: list[str] = []
-        p_tri_elems: list[str] = []
-        p_poly_elems: list[str] = []
+        # Group primitives by material
+        triangle_dict: dict[int, list[list[str]]] = defaultdict(list)
+        polylist_dict: dict[int, list[list[str]]] = defaultdict(list)
 
         for primitive in mesh_obj.primitives:
+            attribute_index = self._data.materials[
+                primitive.material_index
+            ].first_symbol
+
             match primitive.primitive_type:
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE:
-                    # TODO: Fix attempted uv reading if there are no uv-coordinates
-                    p_tri_elems += self.serialize_primitive_triangle(primitive)
+                    triangle_dict[attribute_index].append(
+                        self.serialize_primitive_triangle(primitive)
+                    )
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_QUAD:
-                    vcount_poly_elems.append("4")
-                    p_poly_elems += self.serialize_primitive_quad(primitive)
+                    polylist_dict[attribute_index].append(
+                        self.serialize_primitive_quad(primitive)
+                    )
                 case _:
                     raise NotImplementedError(
                         f"Cannot serialize {primitive.primitive_type.name}"
                     )
 
-        vcount_poly.text = " ".join(vcount_poly_elems)
-        p_tri.text = " ".join(p_tri_elems)
-        p_poly.text = " ".join(p_poly_elems)
-
-        triangles.attrib["count"] = str(len(p_tri_elems) // 3)
-        polygons.attrib["count"] = str(len(vcount_poly_elems))
-
-        # COLLADA uses a right-handed coordinate system; (0, 0) is the bottom-left of an image
-        # textcoord = ET.SubElement(mesh, "mesh")
-        # normal = ET.SubElement(mesh, "mesh")
-        # color = ET.SubElement(mesh, "mesh")
-
+        inputs = self._serialize_inputs(uid)
+        for elem in self._serialize_primitive_dict(
+            "polylist", polylist_dict, inputs, True
+        ):
+            mesh.append(elem)
+        for elem in self._serialize_primitive_dict("triangles", triangle_dict, inputs):
+            mesh.append(elem)
         return geometry
+
+    def _serialize_primitive_dict(
+        self,
+        name: str,
+        prim_dict: dict[int, list[list[str]]],
+        extras: list[ET.Element],
+        include_vcount=False,
+    ) -> list[ET.Element]:
+        """TODO"""
+        xml_elems = []
+        for attribute_index, serialized_primitives in prim_dict.items():
+            polys = ET.Element(
+                name,
+                material=f"material_{attribute_index:03}",
+                count=str(len(serialized_primitives)),
+            )
+            xml_elems.append(polys)
+
+            for elem in extras:
+                polys.append(elem)
+
+            if include_vcount:
+                input_sz = len(extras)
+                vcount = ET.SubElement(polys, "vcount")
+                vcount.text = " ".join(
+                    [str(len(prim) // input_sz) for prim in serialized_primitives]
+                )
+
+            p_elem = ET.SubElement(polys, "p")
+            p_elem.text = " ".join([" ".join(prim) for prim in serialized_primitives])
+        return xml_elems
 
     def _serialize_inputs(self, mesh_obj_uid: str) -> list[ET.Element]:
         """TODO"""
@@ -278,6 +273,7 @@ class HSFFileDAESerializer:
         )
 
         # The fourth primitive is a dummy and always references the first element in each array (position, normal, color, uv)
+        # TODO: Fix attempted uv reading if there are no uv-coordinates
         return [
             str(primitive.vertices[0].position_index),
             str(primitive.vertices[0].uv_index),
@@ -369,19 +365,22 @@ class HSFFileDAESerializer:
         # ???
         matrix.text = "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"
         geo = ET.SubElement(xml_node, "instance_geometry", url=f"#{uid}-mesh", name=uid)
-
         bind_material = ET.SubElement(geo, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
-        material = mesh_obj.primitives[0].material_index
-        attribute_index = self._data.materials[material].first_symbol
-        # print(f"serialize_visual_scene: {attribute_index}")
-        # TODO
-        instance_material = ET.SubElement(
-            technique,
-            "instance_material",
-            symbol=f"material_{attribute_index:03}",
-            target=f"#material_{attribute_index:03}",
-        )
+
+        attribute_indices = set()
+        for primitive in mesh_obj.primitives:
+            attribute_indices.add(
+                self._data.materials[primitive.material_index].first_symbol
+            )
+        for attribute_index in attribute_indices:
+            instance_material = ET.SubElement(
+                technique,
+                "instance_material",
+                symbol=f"material_{attribute_index:03}",
+                target=f"#material_{attribute_index:03}",
+            )
+            # <bind_vertex_input semantic="UVMap" input_semantic="TEXCOORD" input_set="0"/>
 
         # <bind_material>
         #     <technique_common>
