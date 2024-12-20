@@ -57,6 +57,16 @@ class HSFFileDAESerializer:
             library_materials.append(self.serialize_material(mat, i))
             library_effects.append(self.serialize_effects(mat, i))
 
+        # for node, level in self._data.root_node.dfs():
+        #     print(
+        #         "|"
+        #         + "-" * 2 * level
+        #         + " "
+        #         + str(node)
+        #         + " > "
+        #         + str(node.node_data.base_transform)
+        #     )
+
         # Geometry
         geometries = ET.SubElement(root, "library_geometries")
         for i, node in enumerate(
@@ -79,6 +89,7 @@ class HSFFileDAESerializer:
         visual_scene = ET.SubElement(
             visual_scenes, "visual_scene", id="Scene", name="Scene"
         )
+
         for i, node in enumerate(
             filter(
                 lambda node: node.node_data.type == HSFNodeType.MESH, self._data.nodes
@@ -160,6 +171,8 @@ class HSFFileDAESerializer:
             diffuse, "texture", texture=f"sampler_material_{index:03}", texcoord=""
         )
         if material.alpha_flag:
+            # NB: Goes unused after Blender 2.79b
+            # https://projects.blender.org/blender/blender/issues/98920
             transparent = ET.SubElement(phong, "transparent")
             ET.SubElement(
                 transparent,
@@ -357,9 +370,8 @@ class HSFFileDAESerializer:
         return source
 
     def _serialize_transformation_matrix(self, node: HSFNode) -> str:
-        """TODO"""
-        transform = node.node_data.base_transform
-
+        """Serializes the node's local transforms (rotation, scale, position in XYZ) to a transformation Matrix"""
+        transform = node.true_transform
         rot_mat = RotationMatrix.from_euler(transform.rotation, transform.scale)
         trans_mat = TransformationMatrix(rot_mat, transform.position).round()
         return " ".join([str(i) for i in trans_mat.as_raw()])

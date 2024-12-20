@@ -71,6 +71,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
     def _output_file(self):
         """TODO"""
         return HSFFile(
+            self._root_node,
             self._nodes,
             self._textures,
             self._materials,
@@ -519,3 +520,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             assert (
                 child.parent == node
             ), "Node has children, but isn't a parent for one of them"
+        # Non-hierarchy nodes
+        if not node.has_hierarchy:
+            assert node.parent is None, "Node is not hierarchical but has a parent"
+            assert not node.children, "Node is not hierarchical but has children"

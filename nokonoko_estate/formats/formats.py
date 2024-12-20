@@ -30,6 +30,7 @@ class HSFTable:
 class HSFFile:
     """HSF File"""
 
+    root_node: "HSFNode" = None
     nodes: list["HSFNode"] = field(default_factory=list)
     textures: list[tuple[str, Image.Image]] = field(default_factory=list)
     materials: list["MaterialObject"] = field(default_factory=list)
@@ -266,11 +267,57 @@ class HSFNode:
         """Whether this node can have children"""
         return self.node_data.type not in (HSFNodeType.LIGHT, HSFNodeType.CAMERA)
 
+    @property
+    def true_transform(self):
+        """Gets the transform of the HSFNode, accounting for parent transforms as well"""
+        self_transform = self.node_data.base_transform
+        if self.parent is None:
+            return self_transform
+        parent_transform = self.parent.true_transform
+
+        position = (
+            self_transform.position[0] + parent_transform.position[0],
+            self_transform.position[1] + parent_transform.position[1],
+            self_transform.position[2] + parent_transform.position[2],
+        )
+        rotation = (
+            self_transform.rotation[0] + parent_transform.rotation[0],
+            self_transform.rotation[1] + parent_transform.rotation[1],
+            self_transform.rotation[2] + parent_transform.rotation[2],
+        )
+        scale = (
+            self_transform.scale[0] * parent_transform.scale[0],
+            self_transform.scale[1] * parent_transform.scale[1],
+            self_transform.scale[2] * parent_transform.scale[2],
+        )
+        return NodeTransform(position, rotation, scale)
+
     def __str__(self):
         parent_name = "<None>"
         if self.parent is not None:
             parent_name = f'HSFObject[{self.parent.node_data.type.name}, "{self.parent.node_data.name}"]'
         return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", parent={parent_name}, children={len(self.children)}]'
+
+    class Iterator:
+        """TODO"""
+
+        def __iter__(self):
+            pass
+
+        def __next__(self):
+            pass
+
+    def dfs(self, visited=None, level=0):
+        """TODO"""
+        if visited is None:
+            visited: set[HSFNode] = {id(self)}
+        yield self, level
+        for child in self.children:
+            if id(child) not in visited:
+                visited.add(id(child))
+                yield from child.dfs(visited, level + 1)
+            else:
+                raise ValueError("Loop encountered in HSF tree structure")
 
 
 @dataclass
