@@ -218,12 +218,9 @@ class HSFFileDAESerializer:
                         self.serialize_primitive_quad(primitive)
                     )
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP:
-                    tristrips.append(
-                        {
-                            attribute_index: [
-                                self.serialize_primitive_trianglestrip(primitive)
-                            ]
-                        }
+                    # Blender does not support COLLADA's <tristrips>-element. We'll include them as plain old triangles.
+                    triangle_dict[attribute_index].append(
+                        self.serialize_primitive_trianglestrip(primitive)
                     )
                 case _:
                     raise NotImplementedError(
@@ -237,11 +234,6 @@ class HSFFileDAESerializer:
             mesh.append(elem)
         for elem in self._serialize_primitive_dict("triangles", triangle_dict, inputs):
             mesh.append(elem)
-        for strip in tristrips:
-
-            for elem in self._serialize_primitive_dict("tristrips", strip, inputs):
-                mesh.append(elem)
-            break
         return geometry
 
     def _serialize_primitive_dict(
@@ -336,9 +328,27 @@ class HSFFileDAESerializer:
             == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP
         )
         tristrip_data = []
-        for vert in primitive.vertices[:3]:
-            tristrip_data.append(str(vert.position_index))
-            tristrip_data.append(str(vert.uv_index))
+        for i in range(2, len(primitive.vertices)):
+            # Each triangle reuses the two previous vertices
+            if i % 2 == 0:
+                tristrip_data += [
+                    str(primitive.vertices[i - 2].position_index),
+                    str(primitive.vertices[i - 2].uv_index),
+                    str(primitive.vertices[i - 1].position_index),
+                    str(primitive.vertices[i - 1].uv_index),
+                    str(primitive.vertices[i].position_index),
+                    str(primitive.vertices[i].uv_index),
+                ]
+            else:
+                # For every other triangle the winding order is flipped. Otherwise its face will be flipped.
+                tristrip_data += [
+                    str(primitive.vertices[i - 1].position_index),
+                    str(primitive.vertices[i - 1].uv_index),
+                    str(primitive.vertices[i - 2].position_index),
+                    str(primitive.vertices[i - 2].uv_index),
+                    str(primitive.vertices[i].position_index),
+                    str(primitive.vertices[i].uv_index),
+                ]
         return tristrip_data
 
     def serialize_positions(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
