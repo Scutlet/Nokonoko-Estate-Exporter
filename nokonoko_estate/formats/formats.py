@@ -61,7 +61,7 @@ class HSFHeader:
     parts: HSFTable = field(default_factory=HSFTable)
     clusters: HSFTable = field(default_factory=HSFTable)
     shapes: HSFTable = field(default_factory=HSFTable)
-    map_attributes: HSFTable = field(default_factory=HSFTable)
+    map_attributes: HSFTable = field(default_factory=HSFTable)  # Unused
     # end
 
     matrices: HSFTable = field(default_factory=HSFTable)
@@ -177,6 +177,7 @@ class PrimitiveObject(HSFData):
     """
 
     class PrimitiveType(Enum):
+        PRIMITIVE_INVALID = 0
         PRIMITIVE_TRIANGLE = 2
         PRIMITIVE_QUAD = 3
         PRIMITIVE_TRIANGLE_STRIP = 4
@@ -225,8 +226,8 @@ class MeshObject(HSFData):
 class HSFNodeType(Enum):
     """Type of object"""
 
-    NULL1 = 0
-    REPLICA = 1
+    NULL1 = 0  # Indices here (e.g. primitive indices) shouldn't do anything and reference those of meshes
+    REPLICA = 1  # Indices don't mean anything. Instead, copies the previous node (and all its children(?)) in the HSF tree. Base transform is global(?)
     MESH = 2
     ROOT = 3
     JOINT = 4
@@ -435,10 +436,10 @@ class AttributeObject(HSFData):
         1  # Blend with texture alpha else use register color 2 from alpha output
     )
     unk_2: int = 1
-    nbt_enable: float = 0  # 0 is diabled; 1 is enabled
+    nbt_enable: float = 0  # 0 is disabled; 1 is enabled
     unk_3: float = -1
     unk_4: float = 0
-    texture_enable: float = 1  # 0 is diabled; 1 is enabled
+    texture_enable: float = 1  # 0 is disabled; 1 is enabled
     unk_5: float = 0
     tex_anim_start: AttrTransform = field(default_factory=AttrTransform)
     tex_anim_end: AttrTransform = field(default_factory=AttrTransform)

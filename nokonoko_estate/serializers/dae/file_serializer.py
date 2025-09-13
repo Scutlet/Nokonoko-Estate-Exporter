@@ -79,7 +79,6 @@ class HSFFileDAESerializer:
                 or node.mesh_data.name in MESH_WHITELIST
             ):
                 geometries.append(self.serialize_geometry(node, i))
-                node.node_data.attribute_index
 
         # Controller
         asset = ET.SubElement(root, "library_controllers")
@@ -201,6 +200,8 @@ class HSFFileDAESerializer:
         # Group primitives by material
         triangle_dict: dict[int, list[list[str]]] = defaultdict(list)
         polylist_dict: dict[int, list[list[str]]] = defaultdict(list)
+        # Tri-strips are assumed to have the same number of triangles; this isn't always the case here, so we separate each primitive in its own element.
+        tristrips: list[dict[int, list[list[str]]]] = []
 
         for primitive in mesh_obj.primitives:
             attribute_index = self._data.materials[
@@ -216,6 +217,14 @@ class HSFFileDAESerializer:
                     polylist_dict[attribute_index].append(
                         self.serialize_primitive_quad(primitive)
                     )
+                case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP:
+                    tristrips.append(
+                        {
+                            attribute_index: [
+                                self.serialize_primitive_trianglestrip(primitive)
+                            ]
+                        }
+                    )
                 case _:
                     raise NotImplementedError(
                         f"Cannot serialize {primitive.primitive_type.name}"
@@ -228,6 +237,11 @@ class HSFFileDAESerializer:
             mesh.append(elem)
         for elem in self._serialize_primitive_dict("triangles", triangle_dict, inputs):
             mesh.append(elem)
+        for strip in tristrips:
+
+            for elem in self._serialize_primitive_dict("tristrips", strip, inputs):
+                mesh.append(elem)
+            break
         return geometry
 
     def _serialize_primitive_dict(
@@ -312,6 +326,20 @@ class HSFFileDAESerializer:
             str(primitive.vertices[2].position_index),
             str(primitive.vertices[2].uv_index),
         ]
+
+    def serialize_primitive_trianglestrip(
+        self, primitive: PrimitiveObject
+    ) -> list[str]:
+        """TODO"""
+        assert (
+            primitive.primitive_type
+            == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP
+        )
+        tristrip_data = []
+        for vert in primitive.vertices[:3]:
+            tristrip_data.append(str(vert.position_index))
+            tristrip_data.append(str(vert.uv_index))
+        return tristrip_data
 
     def serialize_positions(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
         """TODO"""

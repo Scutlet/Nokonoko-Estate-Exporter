@@ -5,6 +5,7 @@ from nokonoko_estate.serializers.dae.file_serializer import HSFFileDAESerializer
 
 FILENAME = "resources/w05_file24.hsf"
 FILENAME = "resources/w05_file0.hsf"
+FILENAME = "resources/w03/file17.hsf"
 OUTPUT_FOLDER = "output"
 
 if __name__ == "__main__":

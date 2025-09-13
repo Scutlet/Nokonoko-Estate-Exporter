@@ -216,7 +216,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self, headers: list[AttributeHeader]
     ) -> list[HSFAttributes[PrimitiveObject]]:
         """TODO"""
-        ofs = self._fl.tell()
+        base_ofs = self._fl.tell()
         extra_ofs = self._fl.tell()
         for attr in headers:
             # ???
@@ -229,7 +229,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             primitives = []
             result.append(HSFAttributes(prim_name, primitives))
 
-            self._fl.seek(ofs + attr.data_offset)
+            self._fl.seek(base_ofs + attr.data_offset)
             for _ in range(attr.data_count):
                 primitive_type = PrimitiveType(self._parse_short())
                 prim = PrimitiveObject(primitive_type)
@@ -245,7 +245,23 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     # Triangles have an extra (empty) vertex
                     prim.vertices = self._parse_array(VertexParser, 4)
                 elif primitive_type == PrimitiveType.PRIMITIVE_TRIANGLE_STRIP:
-                    raise NotImplementedError("Cannot parse triangle strips")
+                    prim.vertices = self._parse_array(VertexParser, 3)
+                    num_vertices = self._parse_int()
+                    ofs = self._parse_int()
+
+                    cur_ofs = self._fl.tell()
+                    self._fl.seek(extra_ofs + ofs * 8, io.SEEK_SET)
+                    print(f"extra triangle data located at: {self._fl.tell()}")
+                    vertices = self._parse_array(VertexParser, num_vertices)
+                    self._fl.seek(cur_ofs)
+                    prim.tri_count = len(prim.vertices)
+
+                    # ???
+                    new_vert: list[Vertex] = deepcopy(prim.vertices)
+                    new_vert.append(new_vert[1])
+                    new_vert += deepcopy(vertices)
+                    prim.vertices = new_vert
+
                     # num_vertices = self._parse_int()
                     # ofs = self._parse_int()
                     # xxx = self._fl.tell()
