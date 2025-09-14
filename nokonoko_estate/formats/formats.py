@@ -408,7 +408,7 @@ class MaterialObject(HSFData):  # struct
     unk05: float = 1.0
     material_flags: int = 0
     texture_count = 0
-    first_symbol = 0  # attribute_index
+    attribute_index = 0
 
 
 @dataclass

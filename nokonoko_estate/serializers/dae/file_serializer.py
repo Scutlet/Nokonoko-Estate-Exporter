@@ -13,15 +13,19 @@ from nokonoko_estate.formats.formats import (
     HSFNodeType,
     MeshObject,
     PrimitiveObject,
+    Vertex,
 )
 from nokonoko_estate.formats.matrix import RotationMatrix, TransformationMatrix
 
 logger = logging.Logger(__name__)
 
+ColladaTriangle = tuple[Vertex, Vertex, Vertex]
+ColladaPolygon = tuple[Vertex, Vertex, Vertex, Vertex]
 
 EXPORT_ALL = True
 MESH_WHITELIST = ["obj242", "oudan_all", "yazirusi_all", "obj127"]
 MESH_WHITELIST = ["startdai", "oudan_all"]
+NODE_WHITELIST = [HSFNodeType.MESH]
 
 
 class HSFFileDAESerializer:
@@ -64,6 +68,7 @@ class HSFFileDAESerializer:
         #         + " "
         #         + str(node)
         #         + " > "
+        #         + f"primitives_index: {node.node_data.primitives_index}, symbol_index: {node.node_data.symbol_index}, "
         #         + str(node.node_data.base_transform)
         #     )
 
@@ -191,165 +196,201 @@ class HSFFileDAESerializer:
         mesh = ET.SubElement(geometry, "mesh")
         mesh.append(self.serialize_positions(mesh_obj, obj_index))
         # NORMALS
-        mesh.append(self.serialize_uvs(mesh_obj, obj_index))
+        if mesh_obj.uvs:
+            # Only serialize UVs if there are any
+            mesh.append(self.serialize_uvs(mesh_obj, obj_index))
         # COLORS
 
         vertices = ET.SubElement(mesh, "vertices", id=f"{uid}-vertex")
         ET.SubElement(vertices, "input", semantic="POSITION", source=f"#{uid}-position")
 
         # Group primitives by material
-        triangle_dict: dict[int, list[list[str]]] = defaultdict(list)
-        polylist_dict: dict[int, list[list[str]]] = defaultdict(list)
-        # Tri-strips are assumed to have the same number of triangles; this isn't always the case here, so we separate each primitive in its own element.
-        tristrips: list[dict[int, list[list[str]]]] = []
+        triangle_dict: dict[int, list[ColladaTriangle]] = defaultdict(list)
+        polylist_dict: dict[int, list[ColladaPolygon]] = defaultdict(list)
+        self._generate_vertices_from_primitives(
+            mesh_obj.primitives, triangle_dict, polylist_dict
+        )
 
-        for primitive in mesh_obj.primitives:
+        # TODO: Check if mesh_obj.uvs is empty, but uv_data was defined!
+        # TODO: Check if, within a single dictionary item, there are vertices with AND without uv-indices. These should never mix 'n match!
+
+        inputs = self._serialize_inputs(mesh_obj, uid)
+        for elem in self._serialize_primitive_dict(
+            "polylist", polylist_dict, mesh_obj, inputs, include_vcount=True
+        ):
+            mesh.append(elem)
+        for elem in self._serialize_primitive_dict(
+            "triangles", triangle_dict, mesh_obj, inputs
+        ):
+            mesh.append(elem)
+        return geometry
+
+    def _generate_vertices_from_primitives(
+        self,
+        primitives: list[PrimitiveObject],
+        triangle_dict: dict[int, list[ColladaTriangle]],
+        polylist_dict: dict[int, list[ColladaPolygon]],
+    ) -> None:
+        """TODO"""
+
+        for primitive in primitives:
             attribute_index = self._data.materials[
                 primitive.material_index
-            ].first_symbol
+            ].attribute_index
+
 
             match primitive.primitive_type:
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE:
                     triangle_dict[attribute_index].append(
-                        self.serialize_primitive_triangle(primitive)
+                        self.primitive_triangle_to_collada(primitive)
                     )
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_QUAD:
                     polylist_dict[attribute_index].append(
-                        self.serialize_primitive_quad(primitive)
+                        self.primitive_quad_to_collada(primitive)
                     )
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP:
                     # Blender does not support COLLADA's <tristrips>-element. We'll include them as plain old triangles.
-                    triangle_dict[attribute_index].append(
-                        self.serialize_primitive_trianglestrip(primitive)
-                    )
+                    triangle_dict[
+                        attribute_index
+                    ] += self.primtive_triangle_strip_to_collada(primitive)
                 case _:
                     raise NotImplementedError(
                         f"Cannot serialize {primitive.primitive_type.name}"
                     )
 
-        inputs = self._serialize_inputs(uid)
-        for elem in self._serialize_primitive_dict(
-            "polylist", polylist_dict, inputs, True
-        ):
-            mesh.append(elem)
-        for elem in self._serialize_primitive_dict("triangles", triangle_dict, inputs):
-            mesh.append(elem)
-        return geometry
+    def _serialize_vertex(self, vertex: Vertex, include_uv=True) -> str:
+        """Serializes a vertex to COLLADA format"""
+        v = str(vertex.position_index)
+        # TODO: normal_index
+        if include_uv:
+            v += " " + str(vertex.uv_index)
+        # TODO: color_index
+        return v
 
     def _serialize_primitive_dict(
         self,
         name: str,
-        prim_dict: dict[int, list[list[str]]],
-        extras: list[ET.Element],
+        prim_dict: dict[int, list[list[Vertex]]],
+        mesh_obj: MeshObject,
+        inputs: list[ET.Element],
         include_vcount=False,
     ) -> list[ET.Element]:
         """TODO"""
         xml_elems = []
-        for attribute_index, serialized_primitives in prim_dict.items():
+        for attribute_index, primitive_vertices in prim_dict.items():
+            # print(primitive_vertices)
             polys = ET.Element(
                 name,
                 material=f"material_{attribute_index:03}",
-                count=str(len(serialized_primitives)),
+                count=str(len(primitive_vertices)),
             )
             xml_elems.append(polys)
 
-            for elem in extras:
+            for elem in inputs:
                 polys.append(elem)
 
             if include_vcount:
-                input_sz = len(extras)
+                input_sz = len(inputs)
                 vcount = ET.SubElement(polys, "vcount")
                 vcount.text = " ".join(
-                    [str(len(prim) // input_sz) for prim in serialized_primitives]
+                    [str(len(vertices)) for vertices in primitive_vertices]
                 )
 
             p_elem = ET.SubElement(polys, "p")
-            p_elem.text = " ".join([" ".join(prim) for prim in serialized_primitives])
+            p_elem.text = " ".join(
+                [
+                    " ".join(
+                        [
+                            self._serialize_vertex(v, include_uv=bool(mesh_obj.uvs))
+                            for v in vertices
+                        ]
+                    )
+                    for vertices in primitive_vertices
+                ]
+            )
         return xml_elems
 
-    def _serialize_inputs(self, mesh_obj_uid: str) -> list[ET.Element]:
+    def _serialize_inputs(
+        self, mesh_obj: MeshObject, mesh_obj_uid: str
+    ) -> list[ET.Element]:
         """TODO"""
-        return [
+        inputs = [
             ET.Element(
                 "input",
                 semantic="VERTEX",
                 source=f"#{mesh_obj_uid}-vertex",
                 offset="0",
-            ),
-            # TODO: NORMAL
-            ET.Element(
-                "input",
-                semantic="TEXCOORD",
-                source=f"#{mesh_obj_uid}-texcoord",
-                offset="1",  # 2
-            ),
-            # TODO: COLOR
+            )
         ]
+        # TODO: NORMAL
+        if mesh_obj.uvs:
+            inputs.append(
+                ET.Element(
+                    "input",
+                    semantic="TEXCOORD",
+                    source=f"#{mesh_obj_uid}-texcoord",
+                    offset="1",  # 2
+                )
+            )
+        # TODO: COLOR
+        return inputs
 
-    def serialize_primitive_triangle(self, primitive: PrimitiveObject) -> list[str]:
+    def primitive_triangle_to_collada(
+        self, primitive: PrimitiveObject
+    ) -> ColladaTriangle:
         """TODO"""
         assert (
             primitive.primitive_type == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE
         )
 
         # The fourth primitive is a dummy and always references the first element in each array (position, normal, color, uv)
-        # TODO: Fix attempted uv reading if there are no uv-coordinates
-        return [
-            str(primitive.vertices[0].position_index),
-            str(primitive.vertices[0].uv_index),
-            str(primitive.vertices[1].position_index),
-            str(primitive.vertices[1].uv_index),
-            str(primitive.vertices[2].position_index),
-            str(primitive.vertices[2].uv_index),
-        ]
+        return (
+            primitive.vertices[0],
+            primitive.vertices[1],
+            primitive.vertices[2],
+        )
 
-    def serialize_primitive_quad(self, primitive: PrimitiveObject) -> list[str]:
+    def primitive_quad_to_collada(self, primitive: PrimitiveObject) -> ColladaPolygon:
         """TODO"""
         assert primitive.primitive_type == PrimitiveObject.PrimitiveType.PRIMITIVE_QUAD
         # The winding order of vertices produced is counter-clockwise and describes the front side of each polygon
         # Order in HSF-file: 0 1 3 2
-        return [
-            str(primitive.vertices[0].position_index),
-            str(primitive.vertices[0].uv_index),
-            str(primitive.vertices[1].position_index),
-            str(primitive.vertices[1].uv_index),
-            str(primitive.vertices[3].position_index),
-            str(primitive.vertices[3].uv_index),
-            str(primitive.vertices[2].position_index),
-            str(primitive.vertices[2].uv_index),
-        ]
+        return (
+            primitive.vertices[0],
+            primitive.vertices[1],
+            primitive.vertices[3],
+            primitive.vertices[2],
+        )
 
-    def serialize_primitive_trianglestrip(
+    def primtive_triangle_strip_to_collada(
         self, primitive: PrimitiveObject
-    ) -> list[str]:
+    ) -> list[ColladaTriangle]:
         """TODO"""
         assert (
             primitive.primitive_type
             == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP
         )
-        tristrip_data = []
+        triangles = []
         for i in range(2, len(primitive.vertices)):
             # Each triangle reuses the two previous vertices
             if i % 2 == 0:
-                tristrip_data += [
-                    str(primitive.vertices[i - 2].position_index),
-                    str(primitive.vertices[i - 2].uv_index),
-                    str(primitive.vertices[i - 1].position_index),
-                    str(primitive.vertices[i - 1].uv_index),
-                    str(primitive.vertices[i].position_index),
-                    str(primitive.vertices[i].uv_index),
-                ]
+                triangles.append(
+                    (
+                        primitive.vertices[i - 2],
+                        primitive.vertices[i - 1],
+                        primitive.vertices[i],
+                    )
+                )
             else:
                 # For every other triangle the winding order is flipped. Otherwise its face will be flipped.
-                tristrip_data += [
-                    str(primitive.vertices[i - 1].position_index),
-                    str(primitive.vertices[i - 1].uv_index),
-                    str(primitive.vertices[i - 2].position_index),
-                    str(primitive.vertices[i - 2].uv_index),
-                    str(primitive.vertices[i].position_index),
-                    str(primitive.vertices[i].uv_index),
-                ]
-        return tristrip_data
+                triangles.append(
+                    (
+                        primitive.vertices[i - 1],
+                        primitive.vertices[i - 2],
+                        primitive.vertices[i],
+                    )
+                )
+        return triangles
 
     def serialize_positions(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
         """TODO"""
@@ -435,7 +476,7 @@ class HSFFileDAESerializer:
         attribute_indices = set()
         for primitive in mesh_obj.primitives:
             attribute_indices.add(
-                self._data.materials[primitive.material_index].first_symbol
+                self._data.materials[primitive.material_index].attribute_index
             )
         for attribute_index in attribute_indices:
             instance_material = ET.SubElement(

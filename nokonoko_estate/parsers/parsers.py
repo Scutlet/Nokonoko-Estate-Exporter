@@ -256,7 +256,7 @@ class MaterialObjectParser(HSFParserBase[MaterialObject]):
         mat.unk05 = self._parse_float()
         mat.material_flags = self._parse_int()
         mat.texture_count = self._parse_int()
-        mat.first_symbol = self._parse_int()
+        mat.attribute_index = self._parse_int()
 
         return mat
 
