@@ -21,6 +21,7 @@ logger = logging.Logger(__name__)
 
 ColladaTriangle = tuple[Vertex, Vertex, Vertex]
 ColladaPolygon = tuple[Vertex, Vertex, Vertex, Vertex]
+ColladaSetIdx = tuple[int, bool]  # attribute_index, has_uvs, ...
 
 EXPORT_ALL = True
 MESH_WHITELIST = ["obj242", "oudan_all", "yazirusi_all", "obj127"]
@@ -169,6 +170,7 @@ class HSFFileDAESerializer:
         ET.SubElement(sampler2d, "mipmap_maxlevel").text = str(material.mipmap_max_lod)
 
         technique = ET.SubElement(profile, "technique", sid="common")
+        # TODO: Lambert
         phong = ET.SubElement(technique, "phong")
         diffuse = ET.SubElement(phong, "diffuse")
         ET.SubElement(
@@ -205,22 +207,21 @@ class HSFFileDAESerializer:
         ET.SubElement(vertices, "input", semantic="POSITION", source=f"#{uid}-position")
 
         # Group primitives by material
-        triangle_dict: dict[int, list[ColladaTriangle]] = defaultdict(list)
-        polylist_dict: dict[int, list[ColladaPolygon]] = defaultdict(list)
+        triangle_dict: dict[ColladaSetIdx, list[ColladaTriangle]] = defaultdict(list)
+        polylist_dict: dict[ColladaSetIdx, list[ColladaPolygon]] = defaultdict(list)
         self._generate_vertices_from_primitives(
             mesh_obj.primitives, triangle_dict, polylist_dict
         )
 
-        # TODO: Check if mesh_obj.uvs is empty, but uv_data was defined!
-        # TODO: Check if, within a single dictionary item, there are vertices with AND without uv-indices. These should never mix 'n match!
+        self._sanity_check_collada_sets(mesh_obj, triangle_dict)
+        self._sanity_check_collada_sets(mesh_obj, polylist_dict)
 
-        inputs = self._serialize_inputs(mesh_obj, uid)
         for elem in self._serialize_primitive_dict(
-            "polylist", polylist_dict, mesh_obj, inputs, include_vcount=True
+            "polylist", polylist_dict, mesh_obj, uid, include_vcount=True
         ):
             mesh.append(elem)
         for elem in self._serialize_primitive_dict(
-            "triangles", triangle_dict, mesh_obj, inputs
+            "triangles", triangle_dict, mesh_obj, uid
         ):
             mesh.append(elem)
         return geometry
@@ -228,8 +229,8 @@ class HSFFileDAESerializer:
     def _generate_vertices_from_primitives(
         self,
         primitives: list[PrimitiveObject],
-        triangle_dict: dict[int, list[ColladaTriangle]],
-        polylist_dict: dict[int, list[ColladaPolygon]],
+        triangle_dict: dict[ColladaSetIdx, list[ColladaTriangle]],
+        polylist_dict: dict[ColladaSetIdx, list[ColladaPolygon]],
     ) -> None:
         """TODO"""
 
@@ -238,31 +239,65 @@ class HSFFileDAESerializer:
                 primitive.material_index
             ].attribute_index
 
+            collada_set_idx: ColladaSetIdx = (
+                attribute_index,
+                primitive.vertices[0].uv_index != -1,
+            )
 
             match primitive.primitive_type:
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE:
-                    triangle_dict[attribute_index].append(
+                    triangle_dict[collada_set_idx].append(
                         self.primitive_triangle_to_collada(primitive)
                     )
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_QUAD:
-                    polylist_dict[attribute_index].append(
+                    polylist_dict[collada_set_idx].append(
                         self.primitive_quad_to_collada(primitive)
                     )
                 case PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP:
                     # Blender does not support COLLADA's <tristrips>-element. We'll include them as plain old triangles.
                     triangle_dict[
-                        attribute_index
+                        collada_set_idx
                     ] += self.primtive_triangle_strip_to_collada(primitive)
                 case _:
                     raise NotImplementedError(
                         f"Cannot serialize {primitive.primitive_type.name}"
                     )
 
-    def _serialize_vertex(self, vertex: Vertex, include_uv=True) -> str:
+    def _sanity_check_collada_sets(
+        self, mesh_obj: MeshObject, prim_dict: dict[ColladaSetIdx, list[list[Vertex]]]
+    ) -> None:
+        """TODO"""
+        # TODO: Include more general index validity checking in the parser instead of the serializer
+        # Check if mesh_obj.uvs is empty, but uv_data was defined!
+        if not mesh_obj.uvs:
+            for collada_set_idx, primitive_vertices in prim_dict.items():
+                attribute_index = collada_set_idx[0]
+                for vertices in primitive_vertices:
+                    if vertices[0].uv_index != -1:
+                        print(
+                            f"WARN: Mesh {mesh_obj.name} has no UV's. Attribute_index {attribute_index} contains a vertex with a uv-index ({vertices[0].uv_index}) defined! UV-index will be ignored!"
+                        )
+
+        for collada_set_idx, primitive_vertices in prim_dict.items():
+            attribute_index = collada_set_idx[0]
+            has_prim_with_uvs = False
+            has_prim_without_uvs = False
+            for vertices in primitive_vertices:
+                if vertices[0].uv_index == -1:
+                    has_prim_without_uvs = True
+                else:
+                    has_prim_with_uvs = True
+            if has_prim_with_uvs and has_prim_without_uvs:
+                print(
+                    f"WARN: Mesh {mesh_obj.name} with Attribute_index {attribute_index} contains primitives with and without UV-indices."
+                )
+
+
+    def _serialize_vertex(self, vertex: Vertex, include_uvs: bool) -> str:
         """Serializes a vertex to COLLADA format"""
         v = str(vertex.position_index)
         # TODO: normal_index
-        if include_uv:
+        if include_uvs:
             v += " " + str(vertex.uv_index)
         # TODO: color_index
         return v
@@ -270,14 +305,14 @@ class HSFFileDAESerializer:
     def _serialize_primitive_dict(
         self,
         name: str,
-        prim_dict: dict[int, list[list[Vertex]]],
+        prim_dict: dict[ColladaSetIdx, list[list[Vertex]]],
         mesh_obj: MeshObject,
-        inputs: list[ET.Element],
+        uid: str,
         include_vcount=False,
     ) -> list[ET.Element]:
         """TODO"""
         xml_elems = []
-        for attribute_index, primitive_vertices in prim_dict.items():
+        for (attribute_index, has_uvs), primitive_vertices in prim_dict.items():
             # print(primitive_vertices)
             polys = ET.Element(
                 name,
@@ -286,11 +321,12 @@ class HSFFileDAESerializer:
             )
             xml_elems.append(polys)
 
-            for elem in inputs:
-                polys.append(elem)
+            for input in self._serialize_inputs(
+                uid, include_uvs=primitive_vertices[0][0].uv_index != -1
+            ):
+                polys.append(input)
 
             if include_vcount:
-                input_sz = len(inputs)
                 vcount = ET.SubElement(polys, "vcount")
                 vcount.text = " ".join(
                     [str(len(vertices)) for vertices in primitive_vertices]
@@ -299,19 +335,16 @@ class HSFFileDAESerializer:
             p_elem = ET.SubElement(polys, "p")
             p_elem.text = " ".join(
                 [
-                    " ".join(
-                        [
-                            self._serialize_vertex(v, include_uv=bool(mesh_obj.uvs))
-                            for v in vertices
-                        ]
-                    )
+                    " ".join([self._serialize_vertex(v, has_uvs) for v in vertices])
                     for vertices in primitive_vertices
                 ]
             )
         return xml_elems
 
     def _serialize_inputs(
-        self, mesh_obj: MeshObject, mesh_obj_uid: str
+        self,
+        mesh_obj_uid: str,
+        include_uvs=True,
     ) -> list[ET.Element]:
         """TODO"""
         inputs = [
@@ -323,7 +356,7 @@ class HSFFileDAESerializer:
             )
         ]
         # TODO: NORMAL
-        if mesh_obj.uvs:
+        if include_uvs:
             inputs.append(
                 ET.Element(
                     "input",
@@ -371,23 +404,26 @@ class HSFFileDAESerializer:
             == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP
         )
         triangles = []
-        for i in range(2, len(primitive.vertices)):
+        for i in range(len(primitive.vertices) - 2):
             # Each triangle reuses the two previous vertices
+            if i == 1:
+                # The 4th vertex in a triangle strip is identical to the 2nd. This yields an invalid triangle, so should be skipped.
+                continue
             if i % 2 == 0:
                 triangles.append(
                     (
-                        primitive.vertices[i - 2],
-                        primitive.vertices[i - 1],
                         primitive.vertices[i],
+                        primitive.vertices[i + 1],
+                        primitive.vertices[i + 2],
                     )
                 )
             else:
                 # For every other triangle the winding order is flipped. Otherwise its face will be flipped.
                 triangles.append(
                     (
-                        primitive.vertices[i - 1],
-                        primitive.vertices[i - 2],
+                        primitive.vertices[i + 1],
                         primitive.vertices[i],
+                        primitive.vertices[i + 2],
                     )
                 )
         return triangles

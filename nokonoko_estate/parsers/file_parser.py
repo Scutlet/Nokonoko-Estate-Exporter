@@ -80,7 +80,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
     def parse(self) -> HSFFile:
         self._header = HSFHeaderParser(self._fl).parse()
-        # print(self._header)
 
         # Primitives
         self._fl.seek(self._header.primitives.offset, io.SEEK_SET)
@@ -251,31 +250,15 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
                     cur_ofs = self._fl.tell()
                     self._fl.seek(extra_ofs + ofs * 8, io.SEEK_SET)
-                    print(f"extra triangle data located at: {self._fl.tell()}")
                     vertices = self._parse_array(VertexParser, num_vertices)
                     self._fl.seek(cur_ofs)
                     prim.tri_count = len(prim.vertices)
 
-                    # ???
                     new_vert: list[Vertex] = deepcopy(prim.vertices)
+                    # The winding order of the first triangle is different. Add an extra element so the 2nd/3rd triangle connect to the right vertex
                     new_vert.append(new_vert[1])
                     new_vert += deepcopy(vertices)
                     prim.vertices = new_vert
-
-                    # num_vertices = self._parse_int()
-                    # ofs = self._parse_int()
-                    # xxx = self._fl.tell()
-                    # self._fl.seek(extra_ofs + ofs * 8, io.SEEK_SET)
-                    # vertices = self._parse_array(VertexParser, num_vertices)
-                    # self._fl.seek(xxx)
-                    # prim_obj.tri_count = len(prim_obj.vertices)
-
-                    # # ???
-                    # # size: length(vertices) + num_vertices + 1
-                    # new_vert: list[Vertex] = deepcopy(prim_obj.vertices)
-                    # new_vert[3] = new_vert[1]
-                    # new_vert += deepcopy(vertices)
-                    # prim_obj.vertices = new_vert
                 else:
                     raise NotImplementedError(f"Cannot parse {primitive_type}")
 
@@ -284,7 +267,33 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     self._parse_int(),
                     self._parse_int(),
                 )
+
+                self._sanity_check_primitive(prim_name, prim)
         return result
+
+    def _sanity_check_primitive(self, prim_name: str, prim: PrimitiveObject):
+        """TODO"""
+        # Sanity check for UV-formatting; either all vertices have a UV-index set, or none have
+        has_vertex_without_uv = False
+        has_vertex_with_uv = False
+        vertices = (
+            prim.vertices
+            if prim.primitive_type != PrimitiveType.PRIMITIVE_TRIANGLE
+            else prim.vertices[:3]  # Ignore fourth unused vertex (always empty)
+        )
+        for v in vertices:
+            if v.uv_index == -1:
+                has_vertex_without_uv = True
+            else:
+                has_vertex_with_uv = True
+        if has_vertex_without_uv and has_vertex_with_uv:
+            # Shouldn't happen
+            print(
+                f"WARN: Unknown behaviour in primitive {prim_name} ({prim.primitive_type.name}) identified! Found vertex with UV-coordinates defined and vertex without them defined. UV-indices (if unset) will be set to 0 instead. Vertices: {prim.vertices}"
+            )
+            for v in vertices:
+                if v.uv_index == -1:
+                    v.uv_index = 0
 
     def _parse_positions(
         self, headers: list[AttributeHeader]
@@ -361,7 +370,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     # Parses raw bytes in Metanoia, instead of floats
                     (self._parse_float(), self._parse_float())
                 )
-                # print(f"{uv_coords[i]}")
         return result
 
     def _parse_textures(self):
@@ -504,8 +512,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         attribute = None
         if attribute_index != -1:
             attribute = self._attributes[attribute_index]
-
-        # print(node.node_data.type.name, primitives_index, positions_index, uv_index)
 
         # Yet another sanity check. TODO: move
         expected_name = primitives.name
