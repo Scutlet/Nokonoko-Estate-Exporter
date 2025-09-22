@@ -1,6 +1,7 @@
 from copy import deepcopy
 import io
 import logging
+import os
 
 from PIL import Image
 
@@ -23,6 +24,7 @@ from nokonoko_estate.formats.formats import (
     Vertex,
 )
 from nokonoko_estate.parsers.base import HSFParserBase
+from nokonoko_estate.parsers.parser_log import ParserLogger
 from nokonoko_estate.parsers.parsers import (
     AttributeHeaderParser,
     HSFHeaderParser,
@@ -52,6 +54,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         # Attribute header index is used as a key TODO: doesn't work properly!
         self._primitives: list[HSFAttributes[PrimitiveObject]] = []
         self._positions: list[HSFAttributes[tuple[float, float, float]]] = []
+        self._normals: list[HSFAttributes[tuple[float, float, float]]] = []
         self._uvs: list[HSFAttributes[tuple[float, float]]] = []
 
         self._textures: list[tuple[str, Image.Image]] = []
@@ -61,10 +64,17 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         # symbol indices (reference children)
         self._symbols: list[int] = []
 
+        self._fl: ParserLogger = None
+
+    def get_parselog(self):
+        return self._fl.parselog
+
     def parse_from_file(self) -> HSFFile:
         """TODO"""
+        sz = os.path.getsize(self.filepath)
+        print(f"{sz:#x}")
         with open(self.filepath, "rb") as fl:
-            self._fl = fl
+            self._fl = ParserLogger(fl, sz)
             self.parse()
             return self._output_file()
 
@@ -80,6 +90,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
     def parse(self) -> HSFFile:
         self._header = HSFHeaderParser(self._fl).parse()
+
+        # Nodes (these tie everything together; we may need these later on)
+        self._fl.seek(self._header.nodes.offset)
+        self._nodes = self._parse_nodes()
+        print(f"Identified {len(self._nodes)} node(s)")
 
         # Primitives
         self._fl.seek(self._header.primitives.offset, io.SEEK_SET)
@@ -111,15 +126,15 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._positions = self._parse_positions(position_headers)
         print(f"Identified {len(self._positions)} position(s)")
 
-        # (Face) Normals TODO
+        # (Face) Normals
         self._fl.seek(self._header.normals.offset, io.SEEK_SET)
         normal_headers = self._parse_array(
             AttributeHeaderParser, self._header.normals.length
         )
-        self._parse_normals(normal_headers)
-        # print(f"Identified {len(self.)} normal(s)")
+        self._normals = self._parse_normals(normal_headers, self._nodes)
+        print(f"Identified {len(self._normals)} normal(s)")
 
-        # (Vertex) UV's TODO
+        # (Vertex) UV's
         self._fl.seek(self._header.uvs.offset, io.SEEK_SET)
         uv_headers = self._parse_array(AttributeHeaderParser, self._header.uvs.length)
         self._uvs = self._parse_uvs(uv_headers)
@@ -132,10 +147,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             self._symbols.append(self._parse_int(signed=True))
         print(f"Identified {len(self._symbols)} symbol(s)")
 
-        # Nodes (these tie everything together)
-        self._fl.seek(self._header.nodes.offset)
-        self._nodes = self._parse_nodes()
-        print(f"Identified {len(self._nodes)} node(s)")
+        # Setup node references; these make it easier to reference other data
         for node in self._nodes:
             self._setup_node_references(node)
         # Can only verify once all references have been set up
@@ -314,44 +326,47 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 )
         return result
 
-    def _parse_normals(self, headers: list[AttributeHeader]):
+    def _parse_normals(self, headers: list[AttributeHeader], nodes: list[HSFNode]):
         """TODO"""
-        return
         start_ofs = self._fl.tell()
-        flag = 0
-        if len(headers) >= 2:
-            # TODO
-            # var pos = startingOffset + headers[0].DataOffset + headers[0].DataCount * 3;
-            # if (pos % 0x20 != 0)
-            #     pos += 0x20 - (pos % 0x20);
-            # if (headers[1].DataOffset == pos - startingOffset)
-            #     flag = 4;
-            raise NotImplementedError()
+        result: list[HSFAttributes[tuple[float, float, float]]] = []
 
-        for i, attr in enumrate(headers):
-            ofs = self._fl.seek(start_ofs + attr.data_offset)
-            normals: list[tuple[int, int, int]] = []
-            for j in range(attr.data_count):
-                if flag == 4:
-                    # TODO
-                    # nrmList.Add(new Vector3(reader.ReadSByte() / (float)sbyte.MaxValue, reader.ReadSByte() / (float)sbyte.MaxValue, reader.ReadSByte() / (float)sbyte.MaxValue));
-                    raise NotImplementedError()
-                else:
+        print(headers)
+
+        # The way normals should be parsed depends on the node that uses it!
+        for node in nodes:
+            nrm_index = node.node_data.nrm_index
+            if nrm_index <= -1:
+                continue
+            # Sanity check
+            assert nrm_index < len(
+                headers
+            ), f"Attempted to index into normals[{nrm_index}] while there are only {len(headers)} normals!"
+            attr = headers[nrm_index]
+            name = self._parse_from_stringtable(attr.string_offset, -1)
+            normals: list[tuple[float, float, float]] = []
+
+            result.append(HSFAttributes(name, normals))
+
+            self._fl.seek(start_ofs + attr.data_offset)
+            for _ in range(attr.data_count):
+                if node.node_data.cenv_count == 0:
                     normals.append(
-                        # Parses raw bytes in Metanoia, instead of floats
+                        (
+                            self._parse_byte(signed=True) / 127,
+                            self._parse_byte(signed=True) / 127,
+                            self._parse_byte(signed=True) / 127,
+                        )
+                    )
+                else:
+                    print("!!!!!!!!!")
+                    normals.append(
                         (self._parse_float(), self._parse_float(), self._parse_float())
                     )
-                # print(normals[i])
-            name = self._parse_from_stringtable(attr.string_offset, -1)
-            # print(name)
-            if name not in self._mesh_objects:
-                self.logger.warning(
-                    f"{name} was not present in self._mesh_objects, but some (face) normals referenced it!"
-                )
-                raise ValueError()
-                self._mesh_objects[name] = MeshObject(name)
-            self._mesh_objects[name][i].normals += normals
-            print(f"Parsed {len(normals)} (vertex) normals for mesh {name}")
+
+            # TODO: Verify whether there are multiple nodes with the same nrm_idx, but with a different value for cenvCount!
+        print(result)
+        return result
 
     def _parse_uvs(
         self, headers: list[AttributeHeader]
@@ -460,9 +475,14 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         - `self._nodes`
         - `self._primitives`
         - `self._positions`
+        - `self._normals`
         - `self._uvs`
         """
-        if node.node_data.type == HSFNodeType.MESH:
+        if (
+            node.node_data.type == HSFNodeType.MESH
+            or node.node_data.primitives_index in (270, 276)
+            # or node.node_data.type == HSFNodeType.REPLICA
+        ):
             self._setup_mesh_references(node)
 
         if not node.has_hierarchy:
@@ -497,6 +517,13 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         ), f"Expected positions to be present for node {node}"
         positions = self._positions[positions_index]
 
+        # Normals
+        nrm_index = node.node_data.nrm_index
+        # UVs may not be present
+        normal_indices_data = []
+        if nrm_index != -1:
+            normal_indices_data = self._normals[nrm_index].data
+
         # UV coords
         uv_index = node.node_data.uv_index
         # UVs may not be present
@@ -523,6 +550,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         node.mesh_data = MeshObject(expected_name)
         node.mesh_data.primitives = primitives.data
         node.mesh_data.positions = positions.data
+        node.mesh_data.normals = normal_indices_data
         node.mesh_data.uvs = uv_indices_data
         node.attribute = attribute
 

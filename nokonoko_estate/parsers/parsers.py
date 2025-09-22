@@ -91,6 +91,7 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
         header.stringtable.offset = self._parse_int()
         header.stringtable.length = self._parse_int()
 
+        # print(header)
         return header
 
 
