@@ -131,25 +131,31 @@ class HSFNodeDataParser(HSFParserBase[HSFNodeData]):
             (self._parse_float(), self._parse_float(), self._parse_float()),
             (self._parse_float(), self._parse_float(), self._parse_float()),
         )
-        node_data.cull_box_min = (
-            self._parse_float(),
-            self._parse_float(),
-            self._parse_float(),
-        )
-        node_data.cull_box_max = (
-            self._parse_float(),
-            self._parse_float(),
-            self._parse_float(),
-        )
-        node_data.base_morph = self._parse_float()
-        node_data.morph_weights = self._fl.read(0x20 * 4)
+
+        if node_data.type == HSFNodeType.REPLICA:
+            node_data.replica_index = self._parse_int()
+            # the remainder of this is junk data, copied over from the previous non-replica node
+            # TODO This (probably) includes ALL of the index-data below as well, but this should still be verified
+            self._fl.seek(0x08 + 0x0C + 0x04 + 0x20 * 4, io.SEEK_CUR)
+        else:
+            node_data.cull_box_min = (
+                self._parse_float(),
+                self._parse_float(),
+                self._parse_float(),
+            )
+            node_data.cull_box_max = (
+                self._parse_float(),
+                self._parse_float(),
+                self._parse_float(),
+            )
+            node_data.base_morph = self._parse_float()
+            node_data.morph_weights = self._fl.read(0x20 * 4)
 
         node_data.unk_index = self._parse_index()
         node_data.primitives_index = self._parse_index()
         node_data.positions_index = self._parse_index()
         node_data.nrm_index = self._parse_index()
         node_data.color_index = self._parse_index()
-        # 0xd4
         node_data.uv_index = self._parse_index()
 
         node_data.material_data_ofs = self._parse_int()
@@ -166,6 +172,7 @@ class HSFNodeDataParser(HSFParserBase[HSFNodeData]):
         node_data.cenv_index = self._parse_index()
         node_data.cluster_position_ofs = self._parse_int()
         node_data.cluster_nrm_ofs = self._parse_int()
+
         return node_data
 
 

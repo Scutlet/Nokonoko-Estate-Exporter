@@ -23,9 +23,6 @@ ColladaTriangle = tuple[Vertex, Vertex, Vertex]
 ColladaPolygon = tuple[Vertex, Vertex, Vertex, Vertex]
 ColladaSetIdx = tuple[int, bool, bool]  # attribute_index, has_normals, has_uvs, ...
 
-EXPORT_ALL = True
-MESH_WHITELIST = ["obj242", "oudan_all", "yazirusi_all", "obj127"]
-MESH_WHITELIST = ["startdai", "oudan_all"]
 NODE_WHITELIST = [HSFNodeType.MESH]
 
 
@@ -62,29 +59,12 @@ class HSFFileDAESerializer:
             library_materials.append(self.serialize_material(mat, i))
             library_effects.append(self.serialize_effects(mat, i))
 
-        # for node, level in self._data.root_node.dfs():
-        #     print(
-        #         "|"
-        #         + "-" * 2 * level
-        #         + " "
-        #         + str(node)
-        #         + " > "
-        #         + f"primitives_index: {node.node_data.primitives_index}, symbol_index: {node.node_data.symbol_index}, "
-        #         + str(node.node_data.base_transform)
-        #     )
-
         # Geometry
         geometries = ET.SubElement(root, "library_geometries")
         for i, node in enumerate(
-            filter(
-                lambda node: node.node_data.type == HSFNodeType.MESH, self._data.nodes
-            )
+            filter(lambda node: node.node_data.type in NODE_WHITELIST, self._data.nodes)
         ):
-            if EXPORT_ALL or (
-                "w05_file0.dae" not in self.output_path
-                or node.mesh_data.name in MESH_WHITELIST
-            ):
-                geometries.append(self.serialize_geometry(node))
+            geometries.append(self.serialize_geometry(node))
 
         # Controller
         asset = ET.SubElement(root, "library_controllers")
@@ -96,16 +76,10 @@ class HSFFileDAESerializer:
         )
 
         for i, node in enumerate(
-            filter(
-                lambda node: node.node_data.type == HSFNodeType.MESH, self._data.nodes
-            )
+            filter(lambda node: node.node_data.type in NODE_WHITELIST, self._data.nodes)
         ):
             # Add all meshes to the scene
-            if EXPORT_ALL or (
-                "w05_file0.dae" not in self.output_path
-                or node.mesh_data.name in MESH_WHITELIST
-            ):
-                visual_scene.append(self.serialize_visual_scene(node, node.index))
+            visual_scene.append(self.serialize_visual_scene(node, node.index))
 
         # Scene
         scene = ET.SubElement(root, "scene")
@@ -202,7 +176,7 @@ class HSFFileDAESerializer:
         if mesh_obj.uvs:
             # Only serialize UVs if there are any
             mesh.append(self.serialize_uvs(mesh_obj, node.index))
-        # COLORS
+        # TODO COLORS
 
         vertices = ET.SubElement(mesh, "vertices", id=f"{uid}-vertex")
         ET.SubElement(vertices, "input", semantic="POSITION", source=f"#{uid}-position")
@@ -325,7 +299,6 @@ class HSFFileDAESerializer:
             has_normals,
             has_uvs,
         ), primitive_vertices in prim_dict.items():
-            # print(primitive_vertices)
             polys = ET.Element(
                 name,
                 material=f"material_{attribute_index:03}",
@@ -358,6 +331,7 @@ class HSFFileDAESerializer:
                     for vertices in primitive_vertices
                 ]
             )
+
         return xml_elems
 
     def _serialize_inputs(
@@ -560,10 +534,6 @@ class HSFFileDAESerializer:
         geo = ET.SubElement(xml_node, "instance_geometry", url=f"#{uid}-mesh", name=uid)
         bind_material = ET.SubElement(geo, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
-
-        # if node.node_data.name == "obj69":
-        #     print(node.node_data.base_transform)
-        #     print(node.node_data.current_transform)
 
         attribute_indices = set()
         for primitive in mesh_obj.primitives:

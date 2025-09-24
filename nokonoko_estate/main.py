@@ -3,9 +3,11 @@ import os
 from nokonoko_estate.parsers.file_parser import HSFFileParser
 from nokonoko_estate.serializers.dae.file_serializer import HSFFileDAESerializer
 
-FILENAME = "resources/w05_file24.hsf"  # KTT board
-# FILENAME = "resources/w05_file0.hsf"
-FILENAME = "resources/w03/file17.hsf"  # Boo start
+# FILENAME = "resources/w05_file24.hsf"  # KTT board
+FILENAME = "resources/w05_file0.hsf"  # KTT map
+# FILENAME = "resources/w03/file17.hsf"  # Boo start
+# FILENAME = "resources/w03/file23.hsf"
+# FILENAME = "resources/w03/file30.hsf"
 OUTPUT_FOLDER = "output"
 
 if __name__ == "__main__":
@@ -16,10 +18,10 @@ if __name__ == "__main__":
     basename = os.path.splitext(os.path.basename(FILENAME))[0]
     os.makedirs(os.path.join(OUTPUT_FOLDER, basename, "images"), exist_ok=True)
 
-    parse_logpath = os.path.join(OUTPUT_FOLDER, basename, "parser.log")
-    print(f"Exporting parse log to {parse_logpath} ...")
-    with open(parse_logpath, "wb") as fl:
-        fl.write(bytes([x.value for x in parser.get_parselog()]))
+    # parse_logpath = os.path.join(OUTPUT_FOLDER, basename, "parser.log")
+    # print(f"Exporting parse log to {parse_logpath} ...")
+    # with open(parse_logpath, "wb") as fl:
+    #     fl.write(bytes([x.value for x in parser.get_parselog()]))
 
     print(
         f"Exporting textures to {os.path.join(OUTPUT_FOLDER, basename, 'images')} ..."

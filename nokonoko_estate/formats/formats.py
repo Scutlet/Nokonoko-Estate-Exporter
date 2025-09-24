@@ -26,7 +26,7 @@ class HSFTable:
     length: int = 0
 
     def __repr__(self):
-        return f"HSFTable(offsetttt={self.offset:#x}, length={self.length})"
+        return f"HSFTable(offset={self.offset:#x}, length={self.length})"
 
 
 @dataclass
@@ -184,6 +184,7 @@ class PrimitiveObject(HSFData):
         PRIMITIVE_TRIANGLE = 2
         PRIMITIVE_QUAD = 3
         PRIMITIVE_TRIANGLE_STRIP = 4
+        PRIMITIVE_FACE_MASK = 7
 
     primitive_type: PrimitiveType
     flags: int = 0
@@ -235,9 +236,25 @@ class HSFNodeType(Enum):
     ROOT = 3
     JOINT = 4
     EFFECT = 5
+    NULL3 = 6
     CAMERA = 7
     LIGHT = 8
     MAP = 9
+
+
+# //HSF Object Flags
+# define HSF_MATERIAL_BBOARD (1 << 0)
+# define HSF_MATERIAL_NOCULL (1 << 1)
+# define HSF_MATERIAL_SHADOW (1 << 2)
+# define HSF_MATERIAL_SHADOWMAP (1 << 3)
+# define HSF_MATERIAL_ADDCOL (1 << 4)
+# define HSF_MATERIAL_INVCOL (1 << 5)
+# define HSF_MATERIAL_HILITE (1 << 8)
+# define HSF_MATERIAL_DISABLE_ZWRITE (1 << 9)
+# define HSF_MATERIAL_DISPOFF (1 << 10)
+# define HSF_MATERIAL_NEAR (1 << 12)
+# define HSF_MATERIAL_MATHOOK (1 << 13)
+# define HSF_MATERIAL_REFLECTMODEL (1 << 14)
 
 
 @dataclass
@@ -265,9 +282,11 @@ class HSFNode:
     parent: Optional["HSFNode"] = None
     children: list["HSFNode"] = field(default_factory=list)
 
-    mesh_data: MeshObject = None  # If HSFNodeData.type == MESH
+    mesh_data: MeshObject = None  # if HSFNodeData.type == MESH
     attribute: "AttributeObject" = None
     # TODO: envelopes, clusters, shapes
+
+    replica: Optional["HSFNode"] = None  # if HSFNodeData.type == REPLICA
 
     @property
     def has_hierarchy(self):
@@ -276,9 +295,12 @@ class HSFNode:
 
     def __str__(self):
         parent_name = "<None>"
+        replica_name = "<None>"
         if self.parent is not None:
             parent_name = f'HSFObject[{self.parent.node_data.type.name}, "{self.parent.node_data.name}", idx={self.parent.index}]'
-        return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", idx={self.index}, parent={parent_name}, children={len(self.children)}]'
+        if self.replica is not None:
+            replica_name = f'HSFObject[{self.replica.node_data.type.name}, "{self.replica.node_data.name}", idx={self.replica.index}, children={len(self.replica.children)}]'
+        return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", idx={self.index}, replica={replica_name}, parent={parent_name}, children={len(self.children)}]'
 
     class Iterator:
         """TODO"""
@@ -323,8 +345,14 @@ class HSFNodeData(HSFData):
     base_transform: NodeTransform = field(default_factory=NodeTransform)
     current_transform: NodeTransform = field(default_factory=NodeTransform)
 
-    cull_box_min: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
-    cull_box_max: tuple[float, float, float] = field(default_factory=lambda: (1, 1, 1))
+    # value below is ONLY used for REPLICA-nodes
+    replica_index: int = -1
+
+    # All data below is only used for non-REPLICA nodes
+    cull_box_min: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+    cull_box_max: tuple[float, float, float] = field(
+        default_factory=lambda: (100, 100, 100)
+    )
 
     # fmt: off
     base_morph: float = 0.0

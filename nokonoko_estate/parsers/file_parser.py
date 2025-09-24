@@ -80,7 +80,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
     def parse_from_file(self) -> HSFFile:
         """TODO"""
         sz = os.path.getsize(self.filepath)
-        print(f"{sz:#x}")
         with open(self.filepath, "rb") as fl:
             self._fl = ParserLogger(fl, sz)
             self.parse()
@@ -88,6 +87,10 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
     def _output_file(self):
         """TODO"""
+
+        for node, level in self._root_node.dfs():
+            print(f"|{'-' * 4 * level} {node}")
+
         return HSFFile(
             self._root_node,
             self._nodes,
@@ -134,7 +137,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._positions = self._parse_positions(position_headers)
         print(f"Identified {len(self._positions)} position(s)")
 
-        # (Face) Normals
+        # (Vertex) Normals
         self._fl.seek(self._header.normals.offset, io.SEEK_SET)
         normal_headers = self._parse_array(
             AttributeHeaderParser, self._header.normals.length
@@ -148,7 +151,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._uvs = self._parse_uvs(uv_headers)
         print(f"Identified {len(self._uvs)} UV(s)")
 
-        # Colors
+        # (Vertex) Colors
         self._fl.seek(self._header.colors.offset, io.SEEK_SET)
         colors = self._parse_array(AttributeHeaderParser, self._header.colors.length)
         self._colors = self._parse_colors(colors)
@@ -433,7 +436,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                         self._parse_byte() / 255,
                     )
                 )
-        print(result)
         return result
 
     def _parse_motions(self):
@@ -471,12 +473,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     track.constant = self._parse_float()
 
                 motion.tracks.append(track)
-                print(f"\t{track}")
+                # print(f"\t{track}")
 
         # Parse keyframes
         keyframe_start_ofs = self._fl.tell()
         for motion in motions:
-            print(f"{motion}")
             for track in motion.tracks:
                 name = ""
                 if track.string_offset == -1:
@@ -516,7 +517,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                                 assert (
                                     False
                                 ), f"Cannot parse interpolation mode {track.mode.name}"
-                print(f"\t{name} > {track.keyframe_count} vs {len(keyframes)}, {track}")
+                # print(f"\t{name} > {track.keyframe_count} vs {len(keyframes)}, {track}")
 
     def _parse_textures(self):
         """TODO"""
@@ -595,8 +596,18 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         """TODO"""
         node_len = self._header.nodes.length
         nodes: list[HSFNode] = []
-        for _ in range(node_len):
-            nodes.append(HSFNode(HSFNodeParser(self._fl, self._header).parse()))
+        for i in range(node_len):
+            x = self._fl.tell()
+            nodes.append(HSFNode(i, HSFNodeDataParser(self._fl, self._header).parse()))
+            n = nodes[-1].node_data
+            # print(
+            #     f"Node parsed: ",
+            #     i,
+            #     n.type.name,
+            #     n.name,
+            #     n.shape_symbol_index,
+            #     n.shape_count,
+            # )
         return nodes
 
     def _setup_node_references(self, node: HSFNode):
@@ -631,6 +642,10 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             child_index = self._symbols[node.node_data.symbol_index + i]
             child = self._nodes[child_index]
             node.children.append(child)
+
+        # Setup node to replicate
+        if node.node_data.replica_index != -1:
+            node.replica = self._nodes[node.node_data.replica_index]
 
     def _setup_mesh_references(self, node: HSFNode):
         """TODO"""
@@ -705,3 +720,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         if not node.has_hierarchy:
             assert node.parent is None, "Node is not hierarchical but has a parent"
             assert not node.children, "Node is not hierarchical but has children"
+        # Replicas
+        if node.replica:
+            assert (
+                node.replica.node_data.type == HSFNodeType.NULL1
+            ), "Replica node replicates a non-NULL1 node"
