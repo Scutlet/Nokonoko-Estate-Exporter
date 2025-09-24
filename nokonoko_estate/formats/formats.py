@@ -25,6 +25,9 @@ class HSFTable:
     offset: int = 0
     length: int = 0
 
+    def __repr__(self):
+        return f"HSFTable(offsetttt={self.offset:#x}, length={self.length})"
+
 
 @dataclass
 class HSFFile:
@@ -252,6 +255,9 @@ class NodeTransform:
 class HSFNode:
     """TODO"""
 
+    # Used for debugging purposes
+    index: int
+
     node_data: "HSFNodeData"
     # light_data TODO
     # camera_data TODO
@@ -268,36 +274,11 @@ class HSFNode:
         """Whether this node can have children"""
         return self.node_data.type not in (HSFNodeType.LIGHT, HSFNodeType.CAMERA)
 
-    @property
-    def true_transform(self):
-        """Gets the transform of the HSFNode, accounting for parent transforms as well"""
-        self_transform = self.node_data.base_transform
-        if self.parent is None:
-            return self_transform
-        parent_transform = self.parent.true_transform
-
-        position = (
-            self_transform.position[0] + parent_transform.position[0],
-            self_transform.position[1] + parent_transform.position[1],
-            self_transform.position[2] + parent_transform.position[2],
-        )
-        rotation = (
-            self_transform.rotation[0] + parent_transform.rotation[0],
-            self_transform.rotation[1] + parent_transform.rotation[1],
-            self_transform.rotation[2] + parent_transform.rotation[2],
-        )
-        scale = (
-            self_transform.scale[0] * parent_transform.scale[0],
-            self_transform.scale[1] * parent_transform.scale[1],
-            self_transform.scale[2] * parent_transform.scale[2],
-        )
-        return NodeTransform(position, rotation, scale)
-
     def __str__(self):
         parent_name = "<None>"
         if self.parent is not None:
-            parent_name = f'HSFObject[{self.parent.node_data.type.name}, "{self.parent.node_data.name}"]'
-        return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", parent={parent_name}, children={len(self.children)}]'
+            parent_name = f'HSFObject[{self.parent.node_data.type.name}, "{self.parent.node_data.name}", idx={self.parent.index}]'
+        return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", idx={self.index}, parent={parent_name}, children={len(self.children)}]'
 
     class Iterator:
         """TODO"""
@@ -498,3 +479,135 @@ class PaletteInfo(HSFData):
     format: int
     count: int
     data_offset: int  # uint
+
+
+@dataclass
+class HSFMotionData(HSFData):
+    """TODO
+    See: MotionDataSection > MotionData in MPLibrary
+    """
+
+    string_offset: int  # uint
+    track_count: int  # uint
+    track_data_offset: int  # uint
+    motion_length: float  # Number of frames
+
+    tracks: list["HSFTrackData"] = field(default_factory=list)
+
+
+class MotionTrackMode(Enum):
+    """TODO"""
+
+    NORMAL = 2
+    OBJECT = 3
+    UNKNOWN = 4
+    CLUSTER_CURVE = 5
+    CLUSTER_WEIGHT_CURVE = 6
+    CAMERA = 7
+    LIGHT = 8
+    MATERIAL = 9
+    ATTRIBUTE = 10
+
+
+class MotionTrackEffect(Enum):
+    """TODO"""
+
+    AMBIENT_COLOR_R = 0
+    AMBIENT_COLOR_G = 1
+    AMBIENT_COLOR_B = 2
+
+    TRANSLATE_X = 8
+    TRANSLATE_Y = 9
+    TRANSLATE_Z = 10
+
+    LIGHT_AIM_X = 11  # or camera target x
+    LIGHT_AIM_Y = 12  # or camera target y
+    LIGHT_AIM_Z = 13  # or camera target z
+
+    CAMERA_ASPECT = 14
+    CAMERA_FOV = 15
+
+    VISIBLE = 24
+
+    ROTATION_X = 28
+    ROTATION_Y = 29
+    ROTATION_Z = 30
+    SCALE_X = 31
+    SCALE_Y = 32
+    SCALE_Z = 33
+    B_TRANSLATE_X = 34
+    B_TRANSLATE_Y = 35
+    B_TRANSLATE_Z = 36
+    B_ROTATION_X = 37
+    B_ROTATION_Y = 38
+    B_ROTATION_Z = 39
+    MORPH_BLEND = 40
+    B_SCALE_X = 41
+    B_SCALE_Y = 42
+    B_SCALE_Z = 43
+
+    MATERIAL_COLOR_R = 49
+    MATERIAL_COLOR_G = 50
+    MATERIAL_COLOR_B = 51
+    SHADOW_COLOR_R = 52
+    SHADOW_COLOR_G = 53
+    SHADOW_COLOR_B = 54
+    HILITE_SCALE = 55
+    MAT_UNKNOWN_2 = 56
+    TRANSPARENCY = 57
+    MAT_UNKNOWN_3 = 58
+    MAT_UNKNOWN_4 = 59
+    REFLECTION_INTENSITY = 60
+    MAT_UNKNOWN_5 = 61
+    COMBINER_BLENDING = 62
+
+    UNKNOWN_6 = 63
+    UNKNOWN_7 = 64
+    UNKNOWN_8 = 65
+    UNKNOWN_9 = 66
+
+    TEXTURE_INDEX = 67
+
+
+class InterpolationMode(Enum):
+    """TODO"""
+
+    STEP = 0
+    LINEAR = 1
+    BEZIER = 2
+    BITMAP = 3
+    CONSTANT = 4
+    ZERO = 5
+
+
+@dataclass
+class HSFTrackData:
+    """TODO
+    See MotionDataSection > TrackData in MPLibrary
+    """
+
+    mode: MotionTrackMode  # byte
+    unk: int = 0  # byte
+    string_offset: int = -1  # short
+    value_index: int = -1  # short
+    effect: MotionTrackEffect = MotionTrackEffect.AMBIENT_COLOR_B  # short
+    interpolate_type: InterpolationMode = InterpolationMode.LINEAR  # short
+    keyframe_count: int = 0  # short
+    keyframe_offset: int = -1
+    constant: float = 0
+
+
+@dataclass
+class KeyFrame:
+    """TODO"""
+
+    frame: float
+    value: float
+
+
+@dataclass
+class BezierKeyFrame(KeyFrame):
+    """TODO"""
+
+    slope_in: float
+    slope_out: float

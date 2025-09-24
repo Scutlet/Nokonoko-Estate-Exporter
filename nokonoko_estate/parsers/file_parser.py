@@ -8,8 +8,15 @@ from PIL import Image
 from nokonoko_estate.formats.enums import GCNPaletteFormat, GCNTextureFormat
 from nokonoko_estate.formats.formats import (
     AttributeHeader,
+    BezierKeyFrame,
     HSFAttributes,
     HSFNode,
+    HSFMotionData,
+    HSFTrackData,
+    InterpolationMode,
+    KeyFrame,
+    MotionTrackEffect,
+    MotionTrackMode,
     NodeTransform,
     HSFData,
     HSFFile,
@@ -28,9 +35,10 @@ from nokonoko_estate.parsers.parser_log import ParserLogger
 from nokonoko_estate.parsers.parsers import (
     AttributeHeaderParser,
     HSFHeaderParser,
-    HSFNodeParser,
+    HSFNodeDataParser,
     MaterialObjectParser,
     AttributeParser,
+    MotionDataHeaderParser,
     PaletteInfoParser,
     TextureInfoParser,
     VertexParser,
@@ -51,11 +59,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         # There should be only one node without a parent
         self._root_node: HSFNode = None
         self._nodes: list[HSFNode] = []
-        # Attribute header index is used as a key TODO: doesn't work properly!
         self._primitives: list[HSFAttributes[PrimitiveObject]] = []
         self._positions: list[HSFAttributes[tuple[float, float, float]]] = []
         self._normals: list[HSFAttributes[tuple[float, float, float]]] = []
         self._uvs: list[HSFAttributes[tuple[float, float]]] = []
+        self._colors: list[HSFAttributes[tuple[float, float, float, float]]] = []
 
         self._textures: list[tuple[str, Image.Image]] = []
         self._materials: list[MaterialObject] = []
@@ -140,7 +148,13 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._uvs = self._parse_uvs(uv_headers)
         print(f"Identified {len(self._uvs)} UV(s)")
 
-        # Symbols
+        # Colors
+        self._fl.seek(self._header.colors.offset, io.SEEK_SET)
+        colors = self._parse_array(AttributeHeaderParser, self._header.colors.length)
+        self._colors = self._parse_colors(colors)
+        print(f"Identified {len(self._colors)} colors(s)")
+
+        # Symbols (for children)
         self._fl.seek(self._header.symbols.offset)
         self._symbols = []
         for _ in range(self._header.symbols.length):
@@ -153,6 +167,10 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         # Can only verify once all references have been set up
         for node in self._nodes:
             self._verify_node_references(node)
+
+        # Motions
+        self._fl.seek(self._header.motions.offset)
+        self._parse_motions()
 
         # Textures
         self._fl.seek(self._header.textures.offset, io.SEEK_SET)
@@ -331,21 +349,27 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         start_ofs = self._fl.tell()
         result: list[HSFAttributes[tuple[float, float, float]]] = []
 
-        print(headers)
-
         # The way normals should be parsed depends on the node that uses it!
         for node in nodes:
+            if node.node_data.type in (
+                HSFNodeType.LIGHT,
+                HSFNodeType.CAMERA,
+                HSFNodeType.NULL1,
+            ):
+                continue
             nrm_index = node.node_data.nrm_index
             if nrm_index <= -1:
                 continue
             # Sanity check
-            assert nrm_index < len(
-                headers
-            ), f"Attempted to index into normals[{nrm_index}] while there are only {len(headers)} normals!"
+            if nrm_index >= len(headers):
+                print(
+                    f"WARN: In {node} ({node.node_data.type.name}) Attempted to index into normals[{nrm_index:#x}] while there are only {len(headers)} normals!"
+                )
+                continue
+            # TODO: If multiple nodes use the same normals, they are parsed multiple times
             attr = headers[nrm_index]
-            name = self._parse_from_stringtable(attr.string_offset, -1)
             normals: list[tuple[float, float, float]] = []
-
+            name = self._parse_from_stringtable(attr.string_offset, -1)
             result.append(HSFAttributes(name, normals))
 
             self._fl.seek(start_ofs + attr.data_offset)
@@ -359,13 +383,14 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                         )
                     )
                 else:
-                    print("!!!!!!!!!")
+                    # print("!!!!!!!!!")
+                    # TODO: verify
                     normals.append(
                         (self._parse_float(), self._parse_float(), self._parse_float())
                     )
 
             # TODO: Verify whether there are multiple nodes with the same nrm_idx, but with a different value for cenvCount!
-        print(result)
+        # print(result)
         return result
 
     def _parse_uvs(
@@ -386,6 +411,112 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     (self._parse_float(), self._parse_float())
                 )
         return result
+
+    def _parse_colors(
+        self, headers: list[AttributeHeader]
+    ) -> list[HSFAttributes[tuple[float, float, float, float]]]:
+        start_ofs = self._fl.tell()
+
+        result: list[HSFAttributes[tuple[float, float, float, float]]] = []
+        for attr in headers:
+            name = self._parse_from_stringtable(attr.string_offset, -1)
+            color: list[tuple[float, float]] = []
+            result.append(HSFAttributes(name, color))
+
+            self._fl.seek(start_ofs + attr.data_offset)
+            for _ in range(attr.data_count):
+                color.append(
+                    (
+                        self._parse_byte() / 255,
+                        self._parse_byte() / 255,
+                        self._parse_byte() / 255,
+                        self._parse_byte() / 255,
+                    )
+                )
+        print(result)
+        return result
+
+    def _parse_motions(self):
+        """TODO"""
+        motions: list[HSFMotionData] = self._parse_array(
+            MotionDataHeaderParser, self._header.motions.length
+        )
+        start_ofs = self._fl.tell()
+        print(f"Identified {len(motions)} motion(s)")
+
+        for motion in motions:
+            name = self._parse_from_stringtable(motion.string_offset, -1)
+            print(
+                f"> Parsing motion: {name} ({motion.track_count} tracks, {motion.motion_length} frames)"
+            )
+
+            self._fl.seek(start_ofs + motion.track_data_offset)
+            for i in range(motion.track_count):
+                mode = MotionTrackMode(self._parse_byte())
+                track = HSFTrackData(mode)
+                track.unk = self._parse_byte()
+                track.string_offset = self._parse_index(size=2)
+                track.value_index = self._parse_short(signed=True)
+                track.effect = MotionTrackEffect(self._parse_short(signed=True))
+                track.interpolate_type = InterpolationMode(
+                    self._parse_short(signed=True)
+                )
+                track.keyframe_count = self._parse_short(signed=True)
+                if (
+                    track.keyframe_count > 0
+                    and track.interpolate_type != InterpolationMode.CONSTANT
+                ):
+                    track.keyframe_offset = self._parse_int(signed=True)
+                else:
+                    track.constant = self._parse_float()
+
+                motion.tracks.append(track)
+                print(f"\t{track}")
+
+        # Parse keyframes
+        keyframe_start_ofs = self._fl.tell()
+        for motion in motions:
+            print(f"{motion}")
+            for track in motion.tracks:
+                name = ""
+                if track.string_offset == -1:
+                    name = f"{track.mode.name}_{track.value_index}"
+                elif track.value_index > 0:
+                    name = f"{self._parse_from_stringtable(track.string_offset)}_{track.value_index}"
+
+                keyframes = []
+                if (
+                    track.keyframe_count > 0
+                    and track.interpolate_type != InterpolationMode.CONSTANT
+                ):
+                    self._fl.seek(keyframe_start_ofs + track.keyframe_offset)
+                    for _ in range(track.keyframe_count):
+                        match track.interpolate_type:
+                            case InterpolationMode.STEP | InterpolationMode.LINEAR:
+                                keyframes.append(
+                                    KeyFrame(self._parse_float(), self._parse_float())
+                                )
+                            case InterpolationMode.BITMAP:
+                                keyframes.append(
+                                    KeyFrame(
+                                        self._parse_float(),
+                                        self._parse_int(signed=True),
+                                    )
+                                )
+                            case InterpolationMode.BEZIER:
+                                keyframes.append(
+                                    BezierKeyFrame(
+                                        self._parse_float(),
+                                        self._parse_float(),
+                                        self._parse_float(),
+                                        self._parse_float(),
+                                    )
+                                )
+                            case _:
+                                assert (
+                                    False
+                                ), f"Cannot parse interpolation mode {track.mode.name}"
+                print(f"\t{name} > {track.keyframe_count} vs {len(keyframes)}, {track}")
 
     def _parse_textures(self):
         """TODO"""

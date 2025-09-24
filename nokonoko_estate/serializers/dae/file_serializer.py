@@ -84,7 +84,7 @@ class HSFFileDAESerializer:
                 "w05_file0.dae" not in self.output_path
                 or node.mesh_data.name in MESH_WHITELIST
             ):
-                geometries.append(self.serialize_geometry(node, i))
+                geometries.append(self.serialize_geometry(node))
 
         # Controller
         asset = ET.SubElement(root, "library_controllers")
@@ -105,7 +105,7 @@ class HSFFileDAESerializer:
                 "w05_file0.dae" not in self.output_path
                 or node.mesh_data.name in MESH_WHITELIST
             ):
-                visual_scene.append(self.serialize_visual_scene(node, i))
+                visual_scene.append(self.serialize_visual_scene(node, node.index))
 
         # Scene
         scene = ET.SubElement(root, "scene")
@@ -189,19 +189,19 @@ class HSFFileDAESerializer:
 
         return effect
 
-    def serialize_geometry(self, node: HSFNode, obj_index: int) -> ET.Element:
+    def serialize_geometry(self, node: HSFNode) -> ET.Element:
         """TODO"""
         mesh_obj = node.mesh_data
-        uid = f"{mesh_obj.name}__{obj_index}"
+        uid = f"{mesh_obj.name}__{node.index}"
 
         geometry = ET.Element("geometry", id=f"{uid}-mesh", name=uid)
         mesh = ET.SubElement(geometry, "mesh")
-        mesh.append(self.serialize_positions(mesh_obj, obj_index))
+        mesh.append(self.serialize_positions(mesh_obj, node.index))
         if mesh_obj.normals:
-            mesh.append(self.serialize_normals(mesh_obj, obj_index))
+            mesh.append(self.serialize_normals(mesh_obj, node.index))
         if mesh_obj.uvs:
             # Only serialize UVs if there are any
-            mesh.append(self.serialize_uvs(mesh_obj, obj_index))
+            mesh.append(self.serialize_uvs(mesh_obj, node.index))
         # COLORS
 
         vertices = ET.SubElement(mesh, "vertices", id=f"{uid}-vertex")
@@ -529,11 +529,22 @@ class HSFFileDAESerializer:
 
         return source
 
+    def _calc_true_transform(self, node: HSFNode) -> TransformationMatrix:
+        """Calculates the transform of the HSFNode, accounting for parent transforms as well"""
+        rot_mat = RotationMatrix.from_euler(
+            node.node_data.base_transform.rotation, node.node_data.base_transform.scale
+        )
+        trans_mat = TransformationMatrix(
+            rot_mat, node.node_data.base_transform.position
+        ).round()
+        if node.parent is None:
+            return trans_mat
+        parent_trans_mat = self._calc_true_transform(node.parent)
+        return parent_trans_mat * trans_mat
+
     def _serialize_transformation_matrix(self, node: HSFNode) -> str:
         """Serializes the node's local transforms (rotation, scale, position in XYZ) to a transformation Matrix"""
-        transform = node.true_transform
-        rot_mat = RotationMatrix.from_euler(transform.rotation, transform.scale)
-        trans_mat = TransformationMatrix(rot_mat, transform.position).round()
+        trans_mat = self._calc_true_transform(node)
         return " ".join([str(i) for i in trans_mat.as_raw()])
 
     def serialize_visual_scene(self, node: HSFNode, obj_index: int) -> ET.Element:

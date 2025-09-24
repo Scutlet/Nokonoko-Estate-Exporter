@@ -111,3 +111,17 @@ class TransformationMatrix:
             if i % 4 == 3:
                 res += "\n"
         return res
+
+    def __mul__(self, other) -> Self:
+        """Multiplies two 4x4 rotation matrices together. The result is a new transformation matrix"""
+        if not isinstance(other, TransformationMatrix):
+            raise ValueError(f"{other} is not a Rotation Matrix")
+
+        res = TransformationMatrix(RotationMatrix([0] * 9), (0, 0, 0))
+        for i in range(4):
+            for j in range(4):
+                for k in range(4):
+                    res._matrix[4 * i + j] += (
+                        self._matrix[4 * i + k] * other._matrix[4 * k + j]
+                    )
+        return res

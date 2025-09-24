@@ -10,6 +10,7 @@ from nokonoko_estate.formats.formats import (
     LightingChannelFlags,
     MaterialObject,
     AttributeObject,
+    HSFMotionData,
     NodeTransform,
     PaletteInfo,
     TextureInfo,
@@ -95,7 +96,7 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
         return header
 
 
-class HSFNodeParser(HSFParserBase[HSFNodeData]):
+class HSFNodeDataParser(HSFParserBase[HSFNodeData]):
     """Parses XXX"""
 
     _data_type = HSFNodeData
@@ -110,6 +111,13 @@ class HSFNodeParser(HSFParserBase[HSFNodeData]):
         node_data.const_data_ofs = self._parse_int()
         node_data.render_flags = self._parse_int()
 
+        if node_data.type not in (
+            HSFNodeType.MESH,
+            HSFNodeType.NULL1,
+            HSFNodeType.REPLICA,
+            HSFNodeType.LIGHT,
+        ):
+            print(f"Unknown node type: {node_data}")
         node_data.parent_index = self._parse_index()
         node_data.children_count = self._parse_int()
         node_data.symbol_index = self._parse_index()
@@ -274,3 +282,10 @@ class PaletteInfoParser(HSFParserBase[PaletteInfo]):
 
     _data_type = PaletteInfo
     struct_formatting = ">IiiI"
+
+
+class MotionDataHeaderParser(HSFParserBase[HSFMotionData]):
+    """TODO"""
+
+    _data_type = HSFMotionData
+    struct_formatting = ">IIIf"
