@@ -4,8 +4,11 @@ from nokonoko_estate.formats.enums import CombinerBlend, WrapMode
 from nokonoko_estate.formats.formats import (
     AttrTransform,
     AttributeHeader,
+    HSFCameraNodeData,
     HSFHeader,
     HSFHierarchyNodeData,
+    HSFLightNodeData,
+    HSFLightType,
     HSFMeshNodeData,
     HSFNode,
     HSFNodeType,
@@ -130,7 +133,7 @@ class HSFReplicaNodeDataParser(HSFParserBase[HSFReplicaNodeData]):
 
 
 class HSFMeshNodeDataParser(HSFParserBase[HSFMeshNodeData]):
-    """Parses the replica-data of a HSF-node"""
+    """Parses the mesh-data of a HSF-node"""
 
     def parse(self) -> HSFMeshNodeData:
         data = HSFMeshNodeData()
@@ -171,6 +174,38 @@ class HSFMeshNodeDataParser(HSFParserBase[HSFMeshNodeData]):
         return data
 
 
+class HSFLightNodeDataParser(HSFParserBase[HSFLightNodeData]):
+    """Parses the light-data of a HSF-node"""
+
+    def parse(self) -> HSFLightNodeData:
+        data = HSFLightNodeData()
+        data.position = (self._parse_float(), self._parse_float(), self._parse_float())
+        data.target = (self._parse_float(), self._parse_float(), self._parse_float())
+        data.light_type = HSFLightType(self._parse_byte())
+        data.r = self._parse_byte()
+        data.g = self._parse_byte()
+        data.b = self._parse_byte()
+        data.unk2c = self._parse_float()
+        data.ref_distance = self._parse_float()
+        data.ref_brightness = self._parse_float()
+        data.cutoff = self._parse_float()
+        return data
+
+
+class HSFCameraNodeDataParser(HSFParserBase[HSFCameraNodeData]):
+    """Parses the camera-data of a HSF-node"""
+
+    def parse(self) -> HSFCameraNodeData:
+        data = HSFCameraNodeData()
+        data.target = (self._parse_float(), self._parse_float(), self._parse_float())
+        data.position = (self._parse_float(), self._parse_float(), self._parse_float())
+        data.aspect_ratio = self._parse_float()
+        data.fov = self._parse_float()
+        data.near = self._parse_float()
+        data.far = self._parse_float()
+        return data
+
+
 class HSFNodeParser(HSFParserBase[HSFNode]):
     """Parses an HSF-node"""
 
@@ -204,11 +239,11 @@ class HSFNodeParser(HSFParserBase[HSFNode]):
                     self._fl.tell() == start + 0x144
                 ), "Data reader is in the incorrect position!"
             case HSFNodeType.LIGHT:
-                r_parser = HSFMeshNodeDataParser(self._fl, self._header)
+                r_parser = HSFLightNodeDataParser(self._fl, self._header)
                 node.light_data = r_parser.parse()
                 self._fl.seek(start + 0x144, io.SEEK_SET)
             case HSFNodeType.CAMERA:
-                r_parser = HSFMeshNodeDataParser(self._fl, self._header)
+                r_parser = HSFCameraNodeDataParser(self._fl, self._header)
                 node.camera_data = r_parser.parse()
                 self._fl.seek(start + 0x144, io.SEEK_SET)
                 raise ValueError(f"Cannot parse CAMERA-node: {node}")

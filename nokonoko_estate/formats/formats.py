@@ -437,7 +437,6 @@ class HSFLightNodeData(HSFData):
 class HSFCameraNodeData(HSFData):
     """Node data specific for cameras"""
 
-    # TODO: first 16 bytes of node data are used as well
     target: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
     position: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
     aspect_ratio: float = 0
