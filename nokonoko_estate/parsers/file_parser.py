@@ -626,9 +626,10 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             #     i,
             #     n.type.name,
             #     n.name,
-            #     n.shape_symbol_index,
-            #     n.shape_count,
+            #     n.attribute_index,
+            #     n.material_data_ofs,
             # )
+            # print(f"\t{self._attributes[n.attribute_index].}")
         return nodes
 
     def _setup_node_references(self, node: HSFNode):

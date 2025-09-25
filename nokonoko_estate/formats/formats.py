@@ -442,7 +442,9 @@ class LightingChannelFlags(Enum):
 
 @dataclass
 class MaterialObject(HSFData):
-    """TODO (is parsed but seems unused?)
+    """
+    Material data referenced by Primitives
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 

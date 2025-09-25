@@ -233,9 +233,11 @@ class HSFFileDAESerializer:
         Each set is exported to its own <polylist> or <triangle> element later on
         """
         for primitive in primitives:
-            attribute_index = self._data.materials[
-                primitive.material_index
-            ].attribute_index
+            attribute_index = -1
+            if primitive.material_index != -1:
+                attribute_index = self._data.materials[
+                    primitive.material_index
+                ].attribute_index
 
             collada_set_idx: ColladaSetIdx = (
                 attribute_index,
@@ -330,9 +332,10 @@ class HSFFileDAESerializer:
         ), primitive_vertices in prim_dict.items():
             polys = ET.Element(
                 name,
-                material=f"material_{attribute_index:03}",
                 count=str(len(primitive_vertices)),
             )
+            if attribute_index != -1:
+                polys.attrib["material"] = f"material_{attribute_index:03}"
             xml_elems.append(polys)
 
             for input in self._serialize_inputs(
@@ -595,11 +598,16 @@ class HSFFileDAESerializer:
         assert node.node_data.type == HSFNodeType.REPLICA
         res = []
         for child, _ in node.replica.dfs():
-            if child.node_data.type not in (HSFNodeType.MESH, HSFNodeType.NULL1):
-                print(
-                    f"WARN: Replica node {node.index} ({node.node_data.name}) attempts to copy over non-MESH child {child.index} ({child.node_data.name}; {child.node_data.type.name}) of replicated node {node.replica.index} ({node.replica.node_data.name})"
-                )
-                continue
+            match child.node_data.type:
+                case HSFNodeType.NULL1:
+                    continue
+                case HSFNodeType.MESH:
+                    pass
+                case _:
+                    print(
+                        f"WARN: Replica node {node.index} ({node.node_data.name}) attempts to copy over non-MESH child {child.index} ({child.node_data.name}; {child.node_data.type.name}) of replicated node {node.replica.index} ({node.replica.node_data.name})"
+                    )
+                    continue
             res.append(
                 self.serialize_visual_scene_mesh(
                     child,
@@ -640,10 +648,14 @@ class HSFFileDAESerializer:
 
         attribute_indices = set()
         for primitive in node.mesh_data.primitives:
+            if primitive.material_index == -1:
+                continue
             attribute_indices.add(
                 self._data.materials[primitive.material_index].attribute_index
             )
         for attribute_index in attribute_indices:
+            if attribute_index == -1:
+                continue
             instance_material = ET.SubElement(
                 technique,
                 "instance_material",
