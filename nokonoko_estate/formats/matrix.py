@@ -8,10 +8,9 @@ class RotationMatrix:
 
     # fmt: off
     ListMatrix = tuple[
-        float, float, float, float,
-        float, float, float, float,
-        float, float, float, float,
-        float, float, float, float,
+        float, float, float,
+        float, float, float,
+        float, float, float,
     ]
     # fmt: on
 
@@ -84,15 +83,32 @@ class TransformationMatrix:
     ]
     # fmt: on
 
-    def __init__(self, matrix: RotationMatrix, translate: tuple[float, float, float]):
+    def __init__(self, matrix: ListMatrix):
+        self._matrix = matrix
+
+    @classmethod
+    def from_rotation_matrix(
+        cls, matrix: RotationMatrix, translate: tuple[float, float, float]
+    ) -> Self:
         # Add translation to matrix (doesn't affect orientation)
         # fmt: off
-        self._matrix: TransformationMatrix.ListMatrix = [
+        mtx = cls([
             *matrix._matrix[0:3], translate[0],
             *matrix._matrix[3:6], translate[1],
             *matrix._matrix[6:9], translate[2],
             0, 0, 0, 1,
-        ]
+        ])
+        return mtx
+        # fmt: on
+
+    @classmethod
+    def identity(self) -> Self:
+        """Provides a 4x4 identity matrix"""
+        # fmt: off
+        return TransformationMatrix([1, 0, 0, 0,
+                                     0, 1, 0, 0,
+                                     0, 0, 1, 0,
+                                     0, 0, 0, 1])
         # fmt: on
 
     def round(self, decimal_places=6) -> Self:
@@ -115,9 +131,9 @@ class TransformationMatrix:
     def __mul__(self, other) -> Self:
         """Multiplies two 4x4 rotation matrices together. The result is a new transformation matrix"""
         if not isinstance(other, TransformationMatrix):
-            raise ValueError(f"{other} is not a Rotation Matrix")
+            raise ValueError(f"{other} is not a Transformation Matrix")
 
-        res = TransformationMatrix(RotationMatrix([0] * 9), (0, 0, 0))
+        res = TransformationMatrix([0] * 16)
         for i in range(4):
             for j in range(4):
                 for k in range(4):

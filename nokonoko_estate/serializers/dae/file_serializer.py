@@ -75,11 +75,17 @@ class HSFFileDAESerializer:
             visual_scenes, "visual_scene", id="Scene", name="Scene"
         )
 
-        for i, node in enumerate(
-            filter(lambda node: node.node_data.type in NODE_WHITELIST, self._data.nodes)
-        ):
+        for i, node in enumerate(self._data.nodes):
             # Add all meshes to the scene
-            visual_scene.append(self.serialize_visual_scene(node, node.index))
+            match node.node_data.type:
+                case HSFNodeType.MESH:
+                    visual_scene.append(self.serialize_visual_scene_mesh(node))
+                case HSFNodeType.REPLICA:
+                    for e in self.serialize_visual_scene_replica(node):
+                        visual_scene.append(e)
+                case _:
+                    # For all other nodes, do nothing
+                    continue
 
         # Scene
         scene = ET.SubElement(root, "scene")
@@ -503,40 +509,74 @@ class HSFFileDAESerializer:
 
         return source
 
-    def _calc_true_transform(self, node: HSFNode) -> TransformationMatrix:
+    def _calc_true_transform(
+        self, node: HSFNode, root_override: HSFNode = None
+    ) -> TransformationMatrix:
         """Calculates the transform of the HSFNode, accounting for parent transforms as well"""
+        if id(node) == id(root_override):
+            return TransformationMatrix.identity()
+
         rot_mat = RotationMatrix.from_euler(
             node.node_data.base_transform.rotation, node.node_data.base_transform.scale
         )
-        trans_mat = TransformationMatrix(
+        trans_mat = TransformationMatrix.from_rotation_matrix(
             rot_mat, node.node_data.base_transform.position
         ).round()
         if node.parent is None:
             return trans_mat
-        parent_trans_mat = self._calc_true_transform(node.parent)
+        parent_trans_mat = self._calc_true_transform(
+            node.parent, root_override=root_override
+        )
         return parent_trans_mat * trans_mat
 
-    def _serialize_transformation_matrix(self, node: HSFNode) -> str:
+    def _serialize_transformation_matrix(self, mtx: TransformationMatrix) -> str:
         """Serializes the node's local transforms (rotation, scale, position in XYZ) to a transformation Matrix"""
-        trans_mat = self._calc_true_transform(node)
-        return " ".join([str(i) for i in trans_mat.as_raw()])
+        return " ".join([str(i) for i in mtx.as_raw()])
 
-    def serialize_visual_scene(self, node: HSFNode, obj_index: int) -> ET.Element:
+    def serialize_visual_scene_replica(self, node: HSFNode) -> list[ET.Element]:
+        """TODO
+        Copies over all the descendants of the replicated node
+        """
+        res = []
+        for child, _ in filter(
+            lambda n: n[0].node_data.type == HSFNodeType.MESH, node.replica.dfs()
+        ):
+            res.append(
+                self.serialize_visual_scene_mesh(
+                    child,
+                    transform=(
+                        self._calc_true_transform(node)
+                        * self._calc_true_transform(child, root_override=node.replica)
+                    ),
+                    name=f"{child.mesh_data.name}__{child.index}__{node.node_data.name}__{node.index}",
+                )
+            )
+        return res
+
+    def serialize_visual_scene_mesh(
+        self,
+        node: HSFNode,
+        transform: TransformationMatrix = None,
+        name: str = None,
+    ) -> ET.Element:
         """TODO"""
-        mesh_obj = node.mesh_data
-        uid = f"{mesh_obj.name}__{obj_index}"
-
-        xml_node = ET.Element("node", id=uid, name=uid, type="NODE")
+        uid = f"{node.mesh_data.name}__{node.index}"
+        if name is None:
+            name = uid
+        xml_node = ET.Element("node", id=uid, name=name, type="NODE")
         matrix = ET.SubElement(xml_node, "matrix", sid="transform")
         # A list of 16 floating-point values. These values are organized into a 4-by-4
         #   column-order matrix suitable for matrix composition.
-        matrix.text = self._serialize_transformation_matrix(node)
-        geo = ET.SubElement(xml_node, "instance_geometry", url=f"#{uid}-mesh", name=uid)
+        trans_mtx = transform or self._calc_true_transform(node)
+        matrix.text = self._serialize_transformation_matrix(trans_mtx)
+        geo = ET.SubElement(
+            xml_node, "instance_geometry", url=f"#{uid}-mesh", name=name
+        )
         bind_material = ET.SubElement(geo, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
 
         attribute_indices = set()
-        for primitive in mesh_obj.primitives:
+        for primitive in node.mesh_data.primitives:
             attribute_indices.add(
                 self._data.materials[primitive.material_index].attribute_index
             )
@@ -547,6 +587,7 @@ class HSFFileDAESerializer:
                 symbol=f"material_{attribute_index:03}",
                 target=f"#material_{attribute_index:03}",
             )
+            # TODO: uv-coords
             # <bind_vertex_input semantic="UVMap" input_semantic="TEXCOORD" input_set="0"/>
 
         # <bind_material>

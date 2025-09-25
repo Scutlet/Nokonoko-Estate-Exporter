@@ -89,7 +89,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         """TODO"""
 
         for node, level in self._root_node.dfs():
-            print(f"|{'-' * 4 * level} {node}")
+            print(
+                f"|{'-' * 4 * level} {node} @ {node.node_data.base_transform.position}"
+            )
 
         return HSFFile(
             self._root_node,
