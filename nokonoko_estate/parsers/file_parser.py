@@ -621,6 +621,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         - `self._positions`
         - `self._normals`
         - `self._uvs`
+        - `self._colors`
         """
         if (
             node.node_data.type == HSFNodeType.MESH
@@ -667,7 +668,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         # Normals
         nrm_index = node.node_data.nrm_index
-        # UVs may not be present
         normal_indices_data = []
         if nrm_index != -1:
             normal_indices_data = self._normals[nrm_index].data
@@ -680,7 +680,10 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             uv_indices_data = self._uvs[uv_index].data
 
         # Vertex Colors
-        # TODO
+        color_index = node.node_data.color_index
+        color_indices_data = []
+        if color_index != -1:
+            color_indices_data = self._colors[color_index].data
 
         # Attributes
         attribute_index = node.node_data.attribute_index
@@ -700,6 +703,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         node.mesh_data.positions = positions.data
         node.mesh_data.normals = normal_indices_data
         node.mesh_data.uvs = uv_indices_data
+        node.mesh_data.colors = color_indices_data
         node.attribute = attribute
 
     def _verify_node_references(self, node: HSFNode):

@@ -21,9 +21,9 @@ logger = logging.Logger(__name__)
 
 ColladaTriangle = tuple[Vertex, Vertex, Vertex]
 ColladaPolygon = tuple[Vertex, Vertex, Vertex, Vertex]
-ColladaSetIdx = tuple[int, bool, bool]  # attribute_index, has_normals, has_uvs, ...
-
-NODE_WHITELIST = [HSFNodeType.MESH]
+ColladaSetIdx = tuple[
+    int, bool, bool, bool
+]  # attribute_index, has_normals, has_uvs, has_colors, ...
 
 
 class HSFFileDAESerializer:
@@ -62,7 +62,9 @@ class HSFFileDAESerializer:
         # Geometry
         geometries = ET.SubElement(root, "library_geometries")
         for i, node in enumerate(
-            filter(lambda node: node.node_data.type in NODE_WHITELIST, self._data.nodes)
+            filter(
+                lambda node: node.node_data.type == HSFNodeType.MESH, self._data.nodes
+            )
         ):
             geometries.append(self.serialize_geometry(node))
 
@@ -150,22 +152,29 @@ class HSFFileDAESerializer:
         ET.SubElement(sampler2d, "mipmap_maxlevel").text = str(material.mipmap_max_lod)
 
         technique = ET.SubElement(profile, "technique", sid="common")
-        # TODO: Lambert
-        phong = ET.SubElement(technique, "phong")
-        diffuse = ET.SubElement(phong, "diffuse")
+        lambert = ET.SubElement(technique, "lambert")
+        diffuse = ET.SubElement(lambert, "diffuse")
         ET.SubElement(
-            diffuse, "texture", texture=f"sampler_material_{index:03}", texcoord=""
+            diffuse,
+            "texture",
+            texture=f"sampler_material_{index:03}",
+            texcoord="",  # TODO: texcoord
         )
         if material.alpha_flag:
             # NB: Goes unused after Blender 2.79b
             # https://projects.blender.org/blender/blender/issues/98920
-            transparent = ET.SubElement(phong, "transparent")
+            transparent = ET.SubElement(lambert, "transparent")
             ET.SubElement(
                 transparent,
                 "texture",
                 texture=f"sampler_material_{index:03}",
                 texcoord="",
             )
+        # Prevent Blender from complaining
+        ior = ET.SubElement(
+            ET.SubElement(lambert, "index_of_refraction"), "float", sid="ior"
+        )
+        ior.text = "1.45"
 
         return effect
 
@@ -183,6 +192,9 @@ class HSFFileDAESerializer:
             # Only serialize UVs if there are any
             mesh.append(self.serialize_uvs(mesh_obj, node.index))
         # TODO COLORS
+        if mesh_obj.colors:
+            mesh.append(self.serialize_colors(mesh_obj, node.index))
+            print("has vertex colors: " + mesh_obj.name + " " + str(node.index))
 
         vertices = ET.SubElement(mesh, "vertices", id=f"{uid}-vertex")
         ET.SubElement(vertices, "input", semantic="POSITION", source=f"#{uid}-position")
@@ -224,6 +236,7 @@ class HSFFileDAESerializer:
                 attribute_index,
                 primitive.vertices[0].normal_index != -1,
                 primitive.vertices[0].uv_index != -1,
+                primitive.vertices[0].color_index != -1,
             )
 
             match primitive.primitive_type:
@@ -277,7 +290,11 @@ class HSFFileDAESerializer:
         # TODO: Check if, within a single dictionary item, there are vertices with AND without uv-indices. These should never mix 'n match!
 
     def _serialize_vertex(
-        self, vertex: Vertex, include_normals: bool, include_uvs: bool
+        self,
+        vertex: Vertex,
+        include_normals: bool,
+        include_uvs: bool,
+        include_colors: bool,
     ) -> str:
         """Serializes a vertex to COLLADA format"""
         v = str(vertex.position_index)
@@ -287,7 +304,8 @@ class HSFFileDAESerializer:
             assert False, "VERTEX DOES NOT HAVE NORMALS!!!"
         if include_uvs:
             v += " " + str(vertex.uv_index)
-        # TODO: color_index
+        if include_colors:
+            v += " " + str(vertex.color_index)
         return v
 
     def _serialize_primitive_dict(
@@ -304,6 +322,7 @@ class HSFFileDAESerializer:
             attribute_index,
             has_normals,
             has_uvs,
+            has_colors,
         ), primitive_vertices in prim_dict.items():
             polys = ET.Element(
                 name,
@@ -316,6 +335,7 @@ class HSFFileDAESerializer:
                 uid,
                 include_normals=primitive_vertices[0][0].normal_index != -1,
                 include_uvs=primitive_vertices[0][0].uv_index != -1,
+                include_colors=primitive_vertices[0][0].color_index != -1,
             ):
                 polys.append(input)
 
@@ -330,7 +350,7 @@ class HSFFileDAESerializer:
                 [
                     " ".join(
                         [
-                            self._serialize_vertex(v, has_normals, has_uvs)
+                            self._serialize_vertex(v, has_normals, has_uvs, has_colors)
                             for v in vertices
                         ]
                     )
@@ -345,35 +365,48 @@ class HSFFileDAESerializer:
         mesh_obj_uid: str,
         include_normals=True,
         include_uvs=True,
+        include_colors=True,
     ) -> list[ET.Element]:
         """TODO"""
+        offset = 0
         inputs = [
             ET.Element(
                 "input",
                 semantic="VERTEX",
                 source=f"#{mesh_obj_uid}-vertex",
-                offset="0",
+                offset=str(offset),
             )
         ]
         if include_normals:
+            offset += 1
             inputs.append(
                 ET.Element(
                     "input",
                     semantic="NORMAL",
                     source=f"#{mesh_obj_uid}-normals",
-                    offset="1",
+                    offset=str(offset),
                 )
             )
         if include_uvs:
+            offset += 1
             inputs.append(
                 ET.Element(
                     "input",
                     semantic="TEXCOORD",
                     source=f"#{mesh_obj_uid}-texcoord",
-                    offset="2",
+                    offset=str(offset),
                 )
             )
-        # TODO: COLOR
+        if include_colors:
+            offset += 1
+            inputs.append(
+                ET.Element(
+                    "input",
+                    semantic="COLOR",
+                    source=f"#{mesh_obj_uid}-colors",
+                    offset=str(offset),
+                )
+            )
         return inputs
 
     def primitive_triangle_to_collada(
@@ -488,6 +521,24 @@ class HSFFileDAESerializer:
         )
         ET.SubElement(accessor, "param", name="S", type="float")
         ET.SubElement(accessor, "param", name="T", type="float")
+        return source
+
+    def serialize_colors(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
+        """TODO"""
+        uid = f"{mesh_obj.name}__{obj_index}"
+        source = self.serialize_vertex_data_array(mesh_obj.colors, f"{uid}-colors")
+        technique = ET.SubElement(source, "technique_common")
+        accessor = ET.SubElement(
+            technique,
+            "accessor",
+            source=f"#{uid}-colors-array",
+            count=str(len(mesh_obj.colors)),
+            stride="4",
+        )
+        ET.SubElement(accessor, "param", name="R", type="float")
+        ET.SubElement(accessor, "param", name="G", type="float")
+        ET.SubElement(accessor, "param", name="B", type="float")
+        ET.SubElement(accessor, "param", name="A", type="float")
         return source
 
     def serialize_vertex_data_array(
