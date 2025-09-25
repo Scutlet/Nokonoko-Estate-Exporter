@@ -10,9 +10,9 @@ from nokonoko_estate.formats.enums import WrapMode
 from nokonoko_estate.formats.formats import (
     HSFFile,
     AttributeObject,
+    HSFMeshNodeData,
     HSFNode,
     HSFNodeType,
-    MeshObject,
     PrimitiveObject,
     Vertex,
 )
@@ -63,9 +63,7 @@ class HSFFileDAESerializer:
         # Geometry
         geometries = ET.SubElement(root, "library_geometries")
         for i, node in enumerate(
-            filter(
-                lambda node: node.node_data.type == HSFNodeType.MESH, self._data.nodes
-            )
+            filter(lambda node: node.type == HSFNodeType.MESH, self._data.nodes)
         ):
             geometries.append(self.serialize_geometry(node))
 
@@ -80,7 +78,7 @@ class HSFFileDAESerializer:
 
         for i, node in enumerate(self._data.nodes):
             # Add all meshes to the scene
-            match node.node_data.type:
+            match node.type:
                 case HSFNodeType.MESH:
                     visual_scene.append(self.serialize_visual_scene_mesh(node))
                 case HSFNodeType.REPLICA:
@@ -183,20 +181,19 @@ class HSFFileDAESerializer:
         Serializes a single <geometry> node. This basically represents a single mesh,
         which can be instantiated multiple times. E.g. for REPLICA nodes
         """
-        assert node.node_data.type == HSFNodeType.MESH
-        mesh_obj = node.mesh_data
-        uid = f"{mesh_obj.name}__{node.index}"
+        assert node.mesh_data is not None
+        uid = f"{node.mesh_data.name}__{node.index}"
 
         geometry = ET.Element("geometry", id=f"{uid}-mesh", name=uid)
         mesh = ET.SubElement(geometry, "mesh")
-        mesh.append(self.serialize_positions(mesh_obj, node.index))
+        mesh.append(self.serialize_positions(node.mesh_data, node.index))
         # Normals, UVs, colors may not exist. Only serialize them if they do
-        if mesh_obj.normals:
-            mesh.append(self.serialize_normals(mesh_obj, node.index))
-        if mesh_obj.uvs:
-            mesh.append(self.serialize_uvs(mesh_obj, node.index))
-        if mesh_obj.colors:
-            mesh.append(self.serialize_colors(mesh_obj, node.index))
+        if node.mesh_data.normals:
+            mesh.append(self.serialize_normals(node.mesh_data, node.index))
+        if node.mesh_data.uvs:
+            mesh.append(self.serialize_uvs(node.mesh_data, node.index))
+        if node.mesh_data.colors:
+            mesh.append(self.serialize_colors(node.mesh_data, node.index))
 
         vertices = ET.SubElement(mesh, "vertices", id=f"{uid}-vertex")
         ET.SubElement(vertices, "input", semantic="POSITION", source=f"#{uid}-position")
@@ -205,11 +202,11 @@ class HSFFileDAESerializer:
         triangle_dict: dict[ColladaSetIdx, list[ColladaTriangle]] = defaultdict(list)
         polylist_dict: dict[ColladaSetIdx, list[ColladaPolygon]] = defaultdict(list)
         self._generate_vertices_from_primitives(
-            mesh_obj.primitives, triangle_dict, polylist_dict
+            node.mesh_data.primitives, triangle_dict, polylist_dict
         )
 
-        self._sanity_check_collada_sets(mesh_obj, triangle_dict)
-        self._sanity_check_collada_sets(mesh_obj, polylist_dict)
+        self._sanity_check_collada_sets(node.mesh_data, triangle_dict)
+        self._sanity_check_collada_sets(node.mesh_data, polylist_dict)
 
         # Define quads
         for elem in self._serialize_primitive_dict(
@@ -266,18 +263,20 @@ class HSFFileDAESerializer:
                     )
 
     def _sanity_check_collada_sets(
-        self, mesh_obj: MeshObject, prim_dict: dict[ColladaSetIdx, list[list[Vertex]]]
+        self,
+        mesh_data: HSFMeshNodeData,
+        prim_dict: dict[ColladaSetIdx, list[list[Vertex]]],
     ) -> None:
         """TODO"""
         # TODO: Include more general index validity checking in the parser instead of the serializer
         # Check if mesh_obj.uvs is empty, but uv_data was defined!
-        if not mesh_obj.uvs:
+        if not mesh_data.uvs:
             for collada_set_idx, primitive_vertices in prim_dict.items():
                 attribute_index = collada_set_idx[0]
                 for vertices in primitive_vertices:
                     if vertices[0].uv_index != -1:
                         print(
-                            f"WARN: Mesh {mesh_obj.name} has no UV's. Attribute_index {attribute_index} contains a vertex with a uv-index ({vertices[0].uv_index}) defined! UV-index will be ignored!"
+                            f"WARN: Mesh {mesh_data.name} has no UV's. Attribute_index {attribute_index} contains a vertex with a uv-index ({vertices[0].uv_index}) defined! UV-index will be ignored!"
                         )
 
         for collada_set_idx, primitive_vertices in prim_dict.items():
@@ -291,7 +290,7 @@ class HSFFileDAESerializer:
                     has_prim_with_uvs = True
             if has_prim_with_uvs and has_prim_without_uvs:
                 print(
-                    f"WARN: Mesh {mesh_obj.name} with Attribute_index {attribute_index} contains primitives with and without UV-indices."
+                    f"WARN: Mesh {mesh_data.name} with Attribute_index {attribute_index} contains primitives with and without UV-indices."
                 )
 
         # TODO: Check if, within a single dictionary item, there are vertices with AND without uv-indices. These should never mix 'n match!
@@ -476,16 +475,20 @@ class HSFFileDAESerializer:
                 )
         return triangles
 
-    def serialize_positions(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
+    def serialize_positions(
+        self, mesh_data: HSFMeshNodeData, obj_index: int
+    ) -> ET.Element:
         """Serializes the vertex positions of all vertices in a mesh"""
-        uid = f"{mesh_obj.name}__{obj_index}"
-        source = self.serialize_vertex_data_array(mesh_obj.positions, f"{uid}-position")
+        uid = f"{mesh_data.name}__{obj_index}"
+        source = self.serialize_vertex_data_array(
+            mesh_data.positions, f"{uid}-position"
+        )
         technique = ET.SubElement(source, "technique_common")
         accessor = ET.SubElement(
             technique,
             "accessor",
             source=f"#{uid}-position-array",
-            count=str(len(mesh_obj.positions)),
+            count=str(len(mesh_data.positions)),
             stride="3",
         )
         ET.SubElement(accessor, "param", name="X", type="float")
@@ -493,16 +496,18 @@ class HSFFileDAESerializer:
         ET.SubElement(accessor, "param", name="Z", type="float")
         return source
 
-    def serialize_normals(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
+    def serialize_normals(
+        self, mesh_data: HSFMeshNodeData, obj_index: int
+    ) -> ET.Element:
         """Serializes the vertex normals of all vertices in a mesh"""
-        uid = f"{mesh_obj.name}__{obj_index}"
-        source = self.serialize_vertex_data_array(mesh_obj.normals, f"{uid}-normals")
+        uid = f"{mesh_data.name}__{obj_index}"
+        source = self.serialize_vertex_data_array(mesh_data.normals, f"{uid}-normals")
         technique = ET.SubElement(source, "technique_common")
         accessor = ET.SubElement(
             technique,
             "accessor",
             source=f"#{uid}-normals-array",
-            count=str(len(mesh_obj.normals)),
+            count=str(len(mesh_data.normals)),
             stride="3",
         )
         ET.SubElement(accessor, "param", name="X", type="float")
@@ -510,12 +515,12 @@ class HSFFileDAESerializer:
         ET.SubElement(accessor, "param", name="Z", type="float")
         return source
 
-    def serialize_uvs(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
+    def serialize_uvs(self, mesh_data: HSFMeshNodeData, obj_index: int) -> ET.Element:
         """Serializes the texture coordinates (uvs) of all vertices in a mesh"""
-        uid = f"{mesh_obj.name}__{obj_index}"
+        uid = f"{mesh_data.name}__{obj_index}"
         source = self.serialize_vertex_data_array(
             # COLLADA assumes (1.0, 0.0) is the top-left corner; HSF assumes that's bottom-left
-            list(map(lambda st: (st[0], 1 - st[1]), mesh_obj.uvs)),
+            list(map(lambda st: (st[0], 1 - st[1]), mesh_data.uvs)),
             f"{uid}-texcoord",
         )
         technique = ET.SubElement(source, "technique_common")
@@ -523,23 +528,25 @@ class HSFFileDAESerializer:
             technique,
             "accessor",
             source=f"#{uid}-texcoord-array",
-            count=str(len(mesh_obj.uvs)),
+            count=str(len(mesh_data.uvs)),
             stride="2",
         )
         ET.SubElement(accessor, "param", name="S", type="float")
         ET.SubElement(accessor, "param", name="T", type="float")
         return source
 
-    def serialize_colors(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
+    def serialize_colors(
+        self, mesh_data: HSFMeshNodeData, obj_index: int
+    ) -> ET.Element:
         """Serializes the vertex colors of all vertices in a mesh"""
-        uid = f"{mesh_obj.name}__{obj_index}"
-        source = self.serialize_vertex_data_array(mesh_obj.colors, f"{uid}-colors")
+        uid = f"{mesh_data.name}__{obj_index}"
+        source = self.serialize_vertex_data_array(mesh_data.colors, f"{uid}-colors")
         technique = ET.SubElement(source, "technique_common")
         accessor = ET.SubElement(
             technique,
             "accessor",
             source=f"#{uid}-colors-array",
-            count=str(len(mesh_obj.colors)),
+            count=str(len(mesh_data.colors)),
             stride="4",
         )
         ET.SubElement(accessor, "param", name="R", type="float")
@@ -575,15 +582,16 @@ class HSFFileDAESerializer:
             return TransformationMatrix.identity()
 
         rot_mat = RotationMatrix.from_euler(
-            node.node_data.base_transform.rotation, node.node_data.base_transform.scale
+            node.hierarchy_data.base_transform.rotation,
+            node.hierarchy_data.base_transform.scale,
         )
         trans_mat = TransformationMatrix.from_rotation_matrix(
-            rot_mat, node.node_data.base_transform.position
+            rot_mat, node.hierarchy_data.base_transform.position
         ).round()
-        if node.parent is None:
+        if node.hierarchy_data.parent is None:
             return trans_mat
         parent_trans_mat = self._calc_true_transform(
-            node.parent, root_override=root_override
+            node.hierarchy_data.parent, root_override=root_override
         )
         return parent_trans_mat * trans_mat
 
@@ -595,17 +603,17 @@ class HSFFileDAESerializer:
         """
         Serializes a REPLICA-node by copying over all descendants of the replicated node.
         """
-        assert node.node_data.type == HSFNodeType.REPLICA
+        assert node.type == HSFNodeType.REPLICA
         res = []
-        for child, _ in node.replica.dfs():
-            match child.node_data.type:
+        for child, _ in node.replica_data.replica.dfs():
+            match child.type:
                 case HSFNodeType.NULL1:
                     continue
                 case HSFNodeType.MESH:
                     pass
                 case _:
                     print(
-                        f"WARN: Replica node {node.index} ({node.node_data.name}) attempts to copy over non-MESH child {child.index} ({child.node_data.name}; {child.node_data.type.name}) of replicated node {node.replica.index} ({node.replica.node_data.name})"
+                        f"WARN: Replica node {node.index} ({node.name}) attempts to copy over non-MESH child {child.index} ({child.name}; {child.type.name}) of replicated node {node.index} ({node.replica_data.replica.name})"
                     )
                     continue
             res.append(
@@ -613,9 +621,11 @@ class HSFFileDAESerializer:
                     child,
                     transform=(
                         self._calc_true_transform(node)
-                        * self._calc_true_transform(child, root_override=node.replica)
+                        * self._calc_true_transform(
+                            child, root_override=node.replica_data.replica
+                        )
                     ),
-                    name=f"{child.mesh_data.name}__{child.index}__{node.node_data.name}__{node.index}",
+                    name=f"{child.mesh_data.name}__{child.index}__{node.name}__{node.index}",
                 )
             )
         return res
@@ -630,7 +640,7 @@ class HSFFileDAESerializer:
         Serialize an instance of a <geometry>. If `transform` is provided, uses that instead
         of the `node`'s transform.
         """
-        assert node.node_data.type == HSFNodeType.MESH
+        assert node.type == HSFNodeType.MESH
         uid = f"{node.mesh_data.name}__{node.index}"
         if name is None:
             name = uid

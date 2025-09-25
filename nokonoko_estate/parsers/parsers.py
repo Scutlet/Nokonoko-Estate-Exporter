@@ -5,8 +5,11 @@ from nokonoko_estate.formats.formats import (
     AttrTransform,
     AttributeHeader,
     HSFHeader,
-    HSFNodeData,
+    HSFHierarchyNodeData,
+    HSFMeshNodeData,
+    HSFNode,
     HSFNodeType,
+    HSFReplicaNodeData,
     LightingChannelFlags,
     MaterialObject,
     AttributeObject,
@@ -96,89 +99,122 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
         return header
 
 
-class HSFNodeDataParser(HSFParserBase[HSFNodeData]):
-    """Parses XXX"""
+class HSFHierarchyNodeDataParser(HSFParserBase[HSFHierarchyNodeData]):
+    """Parses the hierarchy-data of a HSF-node"""
 
-    _data_type = HSFNodeData
+    def parse(self) -> HSFHierarchyNodeData:
+        data = HSFHierarchyNodeData()
+        data.parent_index = self._parse_index()
+        data.children_count = self._parse_int()
+        data.symbol_index = self._parse_index()
+        data.base_transform = NodeTransform(
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+        )
+        data.current_transform = NodeTransform(
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+        )
+        return data
 
-    def parse(self) -> HSFNodeData:
+
+class HSFReplicaNodeDataParser(HSFParserBase[HSFReplicaNodeData]):
+    """Parses the replica-data of a HSF-node"""
+
+    def parse(self) -> HSFReplicaNodeData:
+        data = HSFReplicaNodeData()
+        data.replica_index = self._parse_int()
+        return data
+
+
+class HSFMeshNodeDataParser(HSFParserBase[HSFMeshNodeData]):
+    """Parses the replica-data of a HSF-node"""
+
+    def parse(self) -> HSFMeshNodeData:
+        data = HSFMeshNodeData()
+        data.cull_box_min = (
+            self._parse_float(),
+            self._parse_float(),
+            self._parse_float(),
+        )
+        data.cull_box_max = (
+            self._parse_float(),
+            self._parse_float(),
+            self._parse_float(),
+        )
+        data.base_morph = self._parse_float()
+        data.morph_weights = self._fl.read(0x20 * 4)
+
+        data.unk_index = self._parse_index()
+        data.primitives_index = self._parse_index()
+        data.positions_index = self._parse_index()
+        data.nrm_index = self._parse_index()
+        data.color_index = self._parse_index()
+        data.uv_index = self._parse_index()
+
+        data.material_data_ofs = self._parse_int()
+        data.attribute_index = self._parse_index()  # Materials
+        data.unk02 = self._parse_byte()  # byte
+        data.unk03 = self._parse_byte()  # byte
+        data.shape_type = self._parse_byte()  # byte
+        data.unk04 = self._parse_byte()  # byte
+        data.shape_count = self._parse_int()
+        data.shape_symbol_index = self._parse_index()
+        data.cluster_count = self._parse_int()
+        data.cluster_symbol_index = self._parse_index()
+        data.cenv_count = self._parse_int()
+        data.cenv_index = self._parse_index()
+        data.cluster_position_ofs = self._parse_int()
+        data.cluster_nrm_ofs = self._parse_int()
+        return data
+
+
+class HSFNodeParser(HSFParserBase[HSFNode]):
+    """Parses an HSF-node"""
+
+    def parse(self) -> HSFNode:
+        start = self._fl.tell()
+        node = HSFNode()
         str_ofs = self._parse_int()
-        name = self._parse_from_stringtable(str_ofs, -1)
+        node.name = self._parse_from_stringtable(str_ofs, -1)
+        node.type = HSFNodeType(self._parse_int())
+        # print(f"> {name or '<empty>'} ({node.type.name})")
+        node.const_data_ofs = self._parse_int()
+        node.render_flags = self._parse_int()
 
-        node_data = HSFNodeData(name)
-        node_data.type = HSFNodeType(self._parse_int())
-        # print(f"> {name or '<empty>'} ({node_data.type.name})")
-        node_data.const_data_ofs = self._parse_int()
-        node_data.render_flags = self._parse_int()
+        if node.type in (HSFNodeType.NULL1, HSFNodeType.MESH, HSFNodeType.REPLICA):
+            h_parser = HSFHierarchyNodeDataParser(self._fl, self._header)
+            node.hierarchy_data = h_parser.parse()
 
-        if node_data.type not in (
-            HSFNodeType.MESH,
-            HSFNodeType.NULL1,
-            HSFNodeType.REPLICA,
-            HSFNodeType.LIGHT,
-        ):
-            print(f"Unknown node type: {node_data}")
-
-        # if node_data.type in (HSFNodeType.LIGHT, HSFNodeType.CAMERA):
-        #     print("skip camera")
-        #     return node_data
-
-        node_data.parent_index = self._parse_index()
-        node_data.children_count = self._parse_int()
-        node_data.symbol_index = self._parse_index()
-        node_data.base_transform = NodeTransform(
-            (self._parse_float(), self._parse_float(), self._parse_float()),
-            (self._parse_float(), self._parse_float(), self._parse_float()),
-            (self._parse_float(), self._parse_float(), self._parse_float()),
-        )
-        node_data.current_transform = NodeTransform(
-            (self._parse_float(), self._parse_float(), self._parse_float()),
-            (self._parse_float(), self._parse_float(), self._parse_float()),
-            (self._parse_float(), self._parse_float(), self._parse_float()),
-        )
-
-        if node_data.type == HSFNodeType.REPLICA:
-            node_data.replica_index = self._parse_int()
-            # the remainder of this is junk data, copied over from the previous non-replica node
-            # TODO This (probably) includes ALL of the index-data below as well, but this should still be verified
-            self._fl.seek(0x08 + 0x0C + 0x04 + 0x20 * 4, io.SEEK_CUR)
-        else:
-            node_data.cull_box_min = (
-                self._parse_float(),
-                self._parse_float(),
-                self._parse_float(),
-            )
-            node_data.cull_box_max = (
-                self._parse_float(),
-                self._parse_float(),
-                self._parse_float(),
-            )
-            node_data.base_morph = self._parse_float()
-            node_data.morph_weights = self._fl.read(0x20 * 4)
-
-        node_data.unk_index = self._parse_index()
-        node_data.primitives_index = self._parse_index()
-        node_data.positions_index = self._parse_index()
-        node_data.nrm_index = self._parse_index()
-        node_data.color_index = self._parse_index()
-        node_data.uv_index = self._parse_index()
-
-        node_data.material_data_ofs = self._parse_int()
-        node_data.attribute_index = self._parse_index()  # Materials
-        node_data.unk02 = self._parse_byte()  # byte
-        node_data.unk03 = self._parse_byte()  # byte
-        node_data.shape_type = self._parse_byte()  # byte
-        node_data.unk04 = self._parse_byte()  # byte
-        node_data.shape_count = self._parse_int()
-        node_data.shape_symbol_index = self._parse_index()
-        node_data.cluster_count = self._parse_int()
-        node_data.cluster_symbol_index = self._parse_index()
-        node_data.cenv_count = self._parse_int()
-        node_data.cenv_index = self._parse_index()
-        node_data.cluster_position_ofs = self._parse_int()
-        node_data.cluster_nrm_ofs = self._parse_int()
-
-        return node_data
+        match node.type:
+            case HSFNodeType.NULL1:
+                # The remainder of the data is junk data. This data was left over from the previous node
+                #   in the node list when the HSF-file was created. Skip over all this junk.
+                self._fl.seek(start + 0x144, io.SEEK_SET)
+            case HSFNodeType.MESH:
+                m_parser = HSFMeshNodeDataParser(self._fl, self._header)
+                node.mesh_data = m_parser.parse()
+            case HSFNodeType.REPLICA:
+                r_parser = HSFReplicaNodeDataParser(self._fl, self._header)
+                node.replica_data = r_parser.parse()
+                self._fl.seek(start + 0x144, io.SEEK_SET)
+                assert (
+                    self._fl.tell() == start + 0x144
+                ), "Data reader is in the incorrect position!"
+            case HSFNodeType.LIGHT:
+                r_parser = HSFMeshNodeDataParser(self._fl, self._header)
+                node.light_data = r_parser.parse()
+                self._fl.seek(start + 0x144, io.SEEK_SET)
+            case HSFNodeType.CAMERA:
+                r_parser = HSFMeshNodeDataParser(self._fl, self._header)
+                node.camera_data = r_parser.parse()
+                self._fl.seek(start + 0x144, io.SEEK_SET)
+                raise ValueError(f"Cannot parse CAMERA-node: {node}")
+            case _:
+                raise ValueError(f"Cannot parse {node.type}-node: {node}")
+        return node
 
 
 class AttributeHeaderParser(HSFParserBase[AttributeHeader]):

@@ -38,6 +38,7 @@ class HSFFile:
     textures: list[tuple[str, Image.Image]] = field(default_factory=list)
     materials: list["MaterialObject"] = field(default_factory=list)
     attributes: list["AttributeObject"] = field(default_factory=list)
+    non_hierarchy_nodes: list["HSFNode"] = field(default_factory=list)
 
 
 @dataclass
@@ -204,35 +205,6 @@ class PrimitiveObject(HSFData):
         return f"PrimitiveObject[{self.primitive_type.name}, vertices={len(self.vertices)}, mat={self.material_index}, tris={self.tri_count}]"
 
 
-@dataclass
-class MeshObject(HSFData):
-    """
-    A helper class for mesh-nodes. Notably consists of a list of primitives (usually single faces)
-    whose vertices index into the listed positions, normals, etc.
-
-    See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
-    """
-
-    name: str
-    single_bind: int = -1
-    positions: list[tuple[int, int, int]] = field(default_factory=list)
-    normals: list[tuple[int, int, int]] = field(default_factory=list)
-    uvs: list[tuple[int, int]] = field(default_factory=list)
-    colors: list[tuple[int, int, int, int]] = field(default_factory=list)
-
-    # Triangles, quads, etc.
-    primitives: list[PrimitiveObject] = field(default_factory=list)
-
-    single_binds: list[RiggingSingleBind] = field(default_factory=list)
-    rigging_double_binds: list[RiggingDoubleBind] = field(default_factory=list)
-    multi_binds: list[RiggingMultiBind] = field(default_factory=list)
-    double_weights: list[RiggingDoubleWeight] = field(default_factory=list)
-    multi_weights: list[RiggingMultiWeight] = field(default_factory=list)
-
-    def __str__(self):
-        return f'MeshObject["{self.name}", primitives={len(self.primitives)}, positions={len(self.positions)}, normals={len(self.normals)}, uvs={len(self.uvs)}, colors={len(self.colors)}]'
-
-
 class HSFNodeType(Enum):
     """Type of node. MESH, REPLICA, and NULL1 are the most common."""
 
@@ -278,49 +250,58 @@ class NodeTransform:
 
 
 @dataclass
-class HSFNode:
+class HSFNode(HSFData):
     """
     A single node in the HSF-file. Nodes are the core of an HSF-file and together form
     a tree structure. The node tree may not be listed in a DFS or BFS manner in the HSF
     FILE; nodes can appear all-over.
+
+    See (NodeObject): https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
+    See: MPLibrary.GCN.HSFObject
     """
 
     # Order in which this node appears in the HSF-file. Referenced by REPLICA nodes
-    index: int
+    index: int = -1
+    name: str = ""
+    type: HSFNodeType = HSFNodeType.NULL1
+    const_data_ofs: int = -1
+    render_flags: int = 0
 
-    # The raw data of a node
-    node_data: "HSFNodeData"
-    # light_data TODO
-    # camera_data TODO
+    hierarchy_data: Optional["HSFHierarchyNodeData"] = None  # REPLICA/NULL1/MESH-nodes
+    replica_data: Optional["HSFReplicaNodeData"] = None  # REPLICA-node
+    mesh_data: Optional["HSFMeshNodeData"] = None  # MESH-node
+    light_data: Optional["HSFLightNodeData"] = None  # LIGHT-node
+    camera_data: Optional["HSFCameraNodeData"] = None  # CAMERA-node
 
-    parent: Optional["HSFNode"] = None
-    children: list["HSFNode"] = field(default_factory=list)
-
-    mesh_data: MeshObject = None  # Only set if the node is a MESH node
-    replica: Optional["HSFNode"] = None  # Only set if hte node is a REPLICA node
-    attribute: "AttributeObject" = None
     # TODO: envelopes, clusters, shapes
 
     @property
     def has_hierarchy(self):
         """Whether this node can have children"""
-        return self.node_data.type not in (HSFNodeType.LIGHT, HSFNodeType.CAMERA)
+        return self.type not in (HSFNodeType.LIGHT, HSFNodeType.CAMERA)
 
     def __str__(self):
-        parent_name = "<None>"
-        replica_name = "<None>"
-        if self.parent is not None:
-            parent_name = f'HSFObject[{self.parent.node_data.type.name}, "{self.parent.node_data.name}", idx={self.parent.index}]'
-        if self.replica is not None:
-            replica_name = f'HSFObject[{self.replica.node_data.type.name}, "{self.replica.node_data.name}", idx={self.replica.index}, children={len(self.replica.children)}]'
-        return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", idx={self.index}, replica={replica_name}, parent={parent_name}, children={len(self.children)}]'
+        name = f"HSFNode[{self.type.name}, '{self.name}', idx={self.index}, "
+        if self.hierarchy_data is not None:
+            parent_name = "<None>"
+            if self.hierarchy_data.parent is not None:
+                parent_name = f'HSFNode[{self.hierarchy_data.parent.type.name}, "{self.hierarchy_data.parent.name}", idx={self.hierarchy_data.parent.index}]'
+            name += (
+                f"parent={parent_name}, children={len(self.hierarchy_data.children)}, "
+            )
+        if self.replica_data is not None:
+            name += f'replica=HSFNode[{self.replica_data.replica.type.name}, "{self.replica_data.replica.name}", idx={self.index}], '
+        return name + "]"
 
     def dfs(self, visited=None, level=0):
         """Iterate over this node in a depth-first search. Raises a ValueError in case of loops."""
         if visited is None:
             visited: set[HSFNode] = {id(self)}
+        if not self.has_hierarchy:
+            yield self, level
+            return
         yield self, level
-        for child in self.children:
+        for child in self.hierarchy_data.children:
             if id(child) not in visited:
                 visited.add(id(child))
                 yield from child.dfs(visited, level + 1)
@@ -329,18 +310,10 @@ class HSFNode:
 
 
 @dataclass
-class HSFNodeData(HSFData):
+class HSFHierarchyNodeData(HSFData):
     """
-    Raw data for an HSF-node.
-
-    See (NodeObject): https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
-    See: MPLibrary.GCN.HSFObject
+    Data only for nodes with a hierarchy. I.e. NULL1, MESH, REPLICA nodes.
     """
-
-    name: str
-    type: HSFNodeType = HSFNodeType.NULL1
-    const_data_ofs: int = -1
-    render_flags: int = 0
 
     # TODO: Camera data/light data. MPLibrary.GCN.HSFObject.Read
     # TODO: Stuff below isn't used for Camera/lights
@@ -353,10 +326,31 @@ class HSFNodeData(HSFData):
         default_factory=NodeTransform
     )  # purpose unknown
 
-    # value below is ONLY used for REPLICA-nodes
+    # Helpers
+    parent: Optional["HSFNode"] = None
+    children: list["HSFNode"] = field(default_factory=list)
+
+
+@dataclass
+class HSFReplicaNodeData(HSFData):
+    """Data only used for REPLICA nodes"""
+
     replica_index: int = -1
 
-    # All data below is only used for non-REPLICA nodes
+    # Helpers
+    replica: "HSFNode" = None
+
+
+@dataclass
+class HSFMeshNodeData(HSFData):
+    """
+    Data only used for MESH nodes, including several helpers. Notably consists of a list
+    of primitives (usually single faces) whose vertices index into the listed positions,
+    normals, etc.
+
+    See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
+    """
+
     cull_box_min: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
     cull_box_max: tuple[float, float, float] = field(
         default_factory=lambda: (100, 100, 100)
@@ -393,6 +387,27 @@ class HSFNodeData(HSFData):
     cluster_position_ofs: int = 0
     cluster_nrm_ofs: int = 0
 
+    # Helpers
+    attribute: Optional["AttributeObject"] = None
+    name: str = ""
+    single_bind: int = -1
+    positions: list[tuple[int, int, int]] = field(default_factory=list)
+    normals: list[tuple[int, int, int]] = field(default_factory=list)
+    uvs: list[tuple[int, int]] = field(default_factory=list)
+    colors: list[tuple[int, int, int, int]] = field(default_factory=list)
+
+    # Triangles, quads, etc.
+    primitives: list[PrimitiveObject] = field(default_factory=list)
+
+    single_binds: list[RiggingSingleBind] = field(default_factory=list)
+    rigging_double_binds: list[RiggingDoubleBind] = field(default_factory=list)
+    multi_binds: list[RiggingMultiBind] = field(default_factory=list)
+    double_weights: list[RiggingDoubleWeight] = field(default_factory=list)
+    multi_weights: list[RiggingMultiWeight] = field(default_factory=list)
+
+    def __str__(self):
+        return f'MeshNodeData["{self.name}", primitives={len(self.primitives)}, positions={len(self.positions)}, normals={len(self.normals)}, uvs={len(self.uvs)}, colors={len(self.colors)}]'
+
 
 class HSFLightType(Enum):
     """Type of light"""
@@ -403,7 +418,7 @@ class HSFLightType(Enum):
 
 
 @dataclass
-class HSFNodeDataLight:
+class HSFLightNodeData(HSFData):
     """Node data specific for lights"""
 
     position: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
@@ -419,7 +434,7 @@ class HSFNodeDataLight:
 
 
 @dataclass
-class HSFNodeDataCamera:
+class HSFCameraNodeData(HSFData):
     """Node data specific for cameras"""
 
     # TODO: first 16 bytes of node data are used as well

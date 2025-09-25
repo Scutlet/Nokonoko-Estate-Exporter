@@ -17,14 +17,10 @@ from nokonoko_estate.formats.formats import (
     KeyFrame,
     MotionTrackEffect,
     MotionTrackMode,
-    NodeTransform,
-    HSFData,
     HSFFile,
     HSFNodeType,
     MaterialObject,
     AttributeObject,
-    MeshObject,
-    HSFNodeData,
     HSFPaletteHeader,
     PrimitiveObject,
     HSFTextureHeader,
@@ -35,7 +31,7 @@ from nokonoko_estate.parsers.parser_log import ParserLogger
 from nokonoko_estate.parsers.parsers import (
     AttributeHeaderParser,
     HSFHeaderParser,
-    HSFNodeDataParser,
+    HSFNodeParser,
     MaterialObjectParser,
     AttributeParser,
     MotionDataHeaderParser,
@@ -58,6 +54,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         # There should be only one node without a parent
         self._root_node: HSFNode = None
+        self._non_hierarchy_nodes: list[HSFNode] = []
         self._nodes: list[HSFNode] = []
         self._primitives: list[HSFAttributes[PrimitiveObject]] = []
         self._positions: list[HSFAttributes[tuple[float, float, float]]] = []
@@ -88,21 +85,24 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         """TODO"""
 
         # for i, node in enumerate(self._nodes):
-        #     if node.node_data.type == HSFNodeType.REPLICA:
+        #     if node.type == HSFNodeType.REPLICA:
         #         print(
-        #             node.node_data.type.name,
+        #             node.type.name,
         #             i,
         #             node,
-        #             node.node_data.symbol_index,
+        #             node.hierarchy_data.symbol_index,
         #         )
-        #         # print("\t" + str(node.parent.node_data))
         #         print("^-- FOUND REPLICA NODE --^")
         #         # exit(-1)
         # print("Didn't find replica...")
+        # print("Non-hierarchy nodes:")
+        for node in self._non_hierarchy_nodes:
+            print(f"| {node} > {node.light_data} {node.camera_data}")
 
+        print("HSF tree:")
         for node, level in self._root_node.dfs():
             print(
-                f"|{'-' * 4 * level} {node} @ {node.node_data.base_transform.position}"
+                f"|{'-' * 4 * level} {node} @ {node.hierarchy_data.base_transform.position}"
             )
 
         return HSFFile(
@@ -136,7 +136,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         )
         print(f"Identified {len(self._materials)} Material(s)")
 
-        # Attributes TODO
+        # Attributes
         self._fl.seek(self._header.attributes.offset, io.SEEK_SET)
         self._attributes = self._parse_array(
             AttributeParser, self._header.attributes.length
@@ -369,19 +369,15 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         # The way normals should be parsed depends on the node that uses it!
         for node in nodes:
-            if node.node_data.type in (
-                HSFNodeType.LIGHT,
-                HSFNodeType.CAMERA,
-                HSFNodeType.NULL1,
-            ):
+            if node.type != HSFNodeType.MESH:
                 continue
-            nrm_index = node.node_data.nrm_index
+            nrm_index = node.mesh_data.nrm_index
             if nrm_index <= -1:
                 continue
             # Sanity check
             if nrm_index >= len(headers):
                 print(
-                    f"WARN: In {node} ({node.node_data.type.name}) Attempted to index into normals[{nrm_index:#x}] while there are only {len(headers)} normals!"
+                    f"WARN: In {node} ({node.type.name}) Attempted to index into normals[{nrm_index:#x}] while there are only {len(headers)} normals!"
                 )
                 continue
             # TODO: If multiple nodes use the same normals, they are parsed multiple times
@@ -392,7 +388,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
             self._fl.seek(start_ofs + attr.data_offset)
             for _ in range(attr.data_count):
-                if node.node_data.cenv_count == 0:
+                if node.mesh_data.cenv_count == 0:
                     normals.append(
                         (
                             self._parse_byte(signed=True) / 127,
@@ -618,18 +614,19 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         node_len = self._header.nodes.length
         nodes: list[HSFNode] = []
         for i in range(node_len):
-            x = self._fl.tell()
-            nodes.append(HSFNode(i, HSFNodeDataParser(self._fl, self._header).parse()))
-            n = nodes[-1].node_data
+            # x = self._fl.tell()
+            node = HSFNodeParser(self._fl, self._header).parse()
+            node.index = i
+            nodes.append(node)
             # print(
             #     f"Node parsed: ",
             #     i,
-            #     n.type.name,
-            #     n.name,
-            #     n.attribute_index,
-            #     n.material_data_ofs,
+            #     node.type.name,
+            #     node.name,
+            #     node.attribute_index,
+            #     node.material_data_ofs,
             # )
-            # print(f"\t{self._attributes[n.attribute_index].}")
+            # print(f"\t{self._attributes[node.attribute_index].}")
         return nodes
 
     def _setup_node_references(self, node: HSFNode):
@@ -645,28 +642,32 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         - `self._uvs`
         - `self._colors`
         """
-        if node.node_data.type == HSFNodeType.MESH:
+        if node.type == HSFNodeType.MESH:
             self._setup_mesh_references(node)
 
         # Setup node to replicate
-        if node.node_data.replica_index != -1:
-            node.replica = self._nodes[node.node_data.replica_index]
+        if node.replica_data and node.replica_data.replica_index != -1:
+            node.replica_data.replica = self._nodes[node.replica_data.replica_index]
 
         if not node.has_hierarchy:
             # Cameras and Lights don't have parents/children
+            self._non_hierarchy_nodes.append(node)
             return
 
         # Set easy access to parent
-        if node.node_data.parent_index != -1:
-            node.parent = self._nodes[node.node_data.parent_index]
-        else:
-            self._root_node = node
+        if node.hierarchy_data:
+            if node.hierarchy_data.parent_index != -1:
+                node.hierarchy_data.parent = self._nodes[
+                    node.hierarchy_data.parent_index
+                ]
+            else:
+                self._root_node = node
 
-        # Children are listed directly after the parent in the symbol indices
-        for i in range(node.node_data.children_count):
-            child_index = self._symbols[node.node_data.symbol_index + i]
-            child = self._nodes[child_index]
-            node.children.append(child)
+            # Children are listed directly after the parent in the symbol indices
+            for i in range(node.hierarchy_data.children_count):
+                child_index = self._symbols[node.hierarchy_data.symbol_index + i]
+                child = self._nodes[child_index]
+                node.hierarchy_data.children.append(child)
 
     def _setup_mesh_references(self, node: HSFNode):
         """
@@ -674,39 +675,39 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         E.g. primitive_index, position_index, etc.
         """
         # Primitives
-        primitives_index = node.node_data.primitives_index
+        primitives_index = node.mesh_data.primitives_index
         assert (
             primitives_index != -1
         ), f"Expected primitives to be present for node {node}"
         primitives = self._primitives[primitives_index]
 
         # Positions
-        positions_index = node.node_data.positions_index
+        positions_index = node.mesh_data.positions_index
         assert (
             positions_index != -1
         ), f"Expected positions to be present for node {node}"
         positions = self._positions[positions_index]
 
         # Normals
-        nrm_index = node.node_data.nrm_index
+        nrm_index = node.mesh_data.nrm_index
         normal_indices_data = []
         if nrm_index != -1:
             normal_indices_data = self._normals[nrm_index].data
 
         # UV coords
-        uv_index = node.node_data.uv_index
+        uv_index = node.mesh_data.uv_index
         uv_indices_data = []
         if uv_index != -1:
             uv_indices_data = self._uvs[uv_index].data
 
         # Vertex Colors
-        color_index = node.node_data.color_index
+        color_index = node.mesh_data.color_index
         color_indices_data = []
         if color_index != -1:
             color_indices_data = self._colors[color_index].data
 
         # Attributes
-        attribute_index = node.node_data.attribute_index
+        attribute_index = node.mesh_data.attribute_index
         attribute = None
         if attribute_index != -1:
             attribute = self._attributes[attribute_index]
@@ -718,36 +719,40 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 attributes.name == expected_name
             ), f"Encountered a name difference {attributes.name} vs {expected_name}"
 
-        node.mesh_data = MeshObject(expected_name)
         node.mesh_data.primitives = primitives.data
         node.mesh_data.positions = positions.data
         node.mesh_data.normals = normal_indices_data
         node.mesh_data.uvs = uv_indices_data
         node.mesh_data.colors = color_indices_data
-        node.attribute = attribute
+        node.mesh_data.attribute = attribute
 
     def _verify_node_references(self, node: HSFNode):
         """Verifies that referenced indices are set up correctly. This is just a sanity check."""
-        # If a node has a parent, the node a child of its parent
-        if node.parent is not None:
-            assert (
-                node in node.parent.children
-            ), "Node has a parent, but isn't a child of that parent"
-        elif node.has_hierarchy:
-            assert (
-                node == self._root_node
-            ), f"Node ({node}) has no parent, but isn't the root node: {self._root_node})"
-        # All children have their parent correctly set
-        for child in node.children:
-            assert (
-                child.parent == node
-            ), "Node has children, but isn't a parent for one of them"
-        # Non-hierarchy nodes
-        if not node.has_hierarchy:
-            assert node.parent is None, "Node is not hierarchical but has a parent"
-            assert not node.children, "Node is not hierarchical but has children"
+        if node.hierarchy_data:
+            # If a node has a parent, the node a child of its parent
+            if node.hierarchy_data.parent is not None:
+                assert (
+                    node in node.hierarchy_data.parent.hierarchy_data.children
+                ), "Node has a parent, but isn't a child of that parent"
+            elif node.has_hierarchy:
+                assert (
+                    node == self._root_node
+                ), f"Node ({node}) has no parent, but isn't the root node: {self._root_node})"
+            # All children have their parent correctly set
+            for child in node.hierarchy_data.children:
+                assert (
+                    child.hierarchy_data.parent == node
+                ), "Node has children, but isn't a parent for one of them"
+            # Non-hierarchy nodes
+            if not node.has_hierarchy:
+                assert (
+                    node.hierarchy_data.parent is None
+                ), "Node is not hierarchical but has a parent"
+                assert (
+                    not node.hierarchy_data.children
+                ), "Node is not hierarchical but has children"
         # Replicas
-        if node.replica:
+        if node.replica_data and node.replica_data.replica:
             assert (
-                node.replica.node_data.type == HSFNodeType.NULL1
+                node.replica_data.replica.type == HSFNodeType.NULL1
             ), "Replica node replicates a non-NULL1 node"
