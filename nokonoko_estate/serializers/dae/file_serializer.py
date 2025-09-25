@@ -644,7 +644,7 @@ class HSFFileDAESerializer:
         uid = f"{node.mesh_data.name}__{node.index}"
         if name is None:
             name = uid
-        xml_node = ET.Element("node", id=uid, name=name, type="NODE")
+        xml_node = ET.Element("node", id=name, name=name, type="NODE")
         matrix = ET.SubElement(xml_node, "matrix", sid="transform")
         # A list of 16 floating-point values. These values are organized into a 4-by-4
         #   column-order matrix suitable for matrix composition.

@@ -719,6 +719,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 attributes.name == expected_name
             ), f"Encountered a name difference {attributes.name} vs {expected_name}"
 
+        node.mesh_data.name = expected_name
         node.mesh_data.primitives = primitives.data
         node.mesh_data.positions = positions.data
         node.mesh_data.normals = normal_indices_data
