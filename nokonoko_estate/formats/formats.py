@@ -86,7 +86,9 @@ class AttributeHeader(HSFData):
 
 @dataclass
 class Vertex(HSFData):
-    """TODO
+    """
+    A single vertex that indices into generic arrays. The index is -1 if unused.
+    Indices include position (XYZ-coordinates), vertex normals (XYZ), vertex colors (RGBA), and UV-coordinates
 
     See (VertexGroup): https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
@@ -175,7 +177,9 @@ class HSFAttributes(Generic[T]):
 
 @dataclass
 class PrimitiveObject(HSFData):
-    """TODO
+    """
+    Represents a single face (triangle or quad) or a series of faces (triangle strip). Usually consists of few vertices.
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -202,8 +206,10 @@ class PrimitiveObject(HSFData):
 
 @dataclass
 class MeshObject(HSFData):
-    """TODO
-    This is a placeholder class that ties everything together
+    """
+    A helper class for mesh-nodes. Notably consists of a list of primitives (usually single faces)
+    whose vertices index into the listed positions, normals, etc.
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -228,10 +234,10 @@ class MeshObject(HSFData):
 
 
 class HSFNodeType(Enum):
-    """Type of object"""
+    """Type of node. MESH, REPLICA, and NULL1 are the most common."""
 
-    NULL1 = 0  # Indices here (e.g. primitive indices) shouldn't do anything and reference those of meshes
-    REPLICA = 1  # Indices don't mean anything. Instead, copies the previous node (and all its children(?)) in the HSF tree. Base transform is global(?)
+    NULL1 = 0  # Used to group other related nodes together. Can be referenced by REPLICA-nodes to copy all of its children in a different XYZ-location.
+    REPLICA = 1  # Copies all children in the HSF tree of the referenced (NULL1) node.
     MESH = 2
     ROOT = 3
     JOINT = 4
@@ -259,7 +265,10 @@ class HSFNodeType(Enum):
 
 @dataclass
 class NodeTransform:
-    """TODO
+    """
+    Positioning in the world of a node. This transform is relative to its parent
+    (or REPLICA-node) in the HSF-tree.
+
     See: MPLibrary.GCN.Transform
     """
 
@@ -270,11 +279,16 @@ class NodeTransform:
 
 @dataclass
 class HSFNode:
-    """TODO"""
+    """
+    A single node in the HSF-file. Nodes are the core of an HSF-file and together form
+    a tree structure. The node tree may not be listed in a DFS or BFS manner in the HSF
+    FILE; nodes can appear all-over.
+    """
 
-    # Used for debugging purposes
+    # Order in which this node appears in the HSF-file. Referenced by REPLICA nodes
     index: int
 
+    # The raw data of a node
     node_data: "HSFNodeData"
     # light_data TODO
     # camera_data TODO
@@ -282,11 +296,10 @@ class HSFNode:
     parent: Optional["HSFNode"] = None
     children: list["HSFNode"] = field(default_factory=list)
 
-    mesh_data: MeshObject = None  # if HSFNodeData.type == MESH
+    mesh_data: MeshObject = None  # Only set if the node is a MESH node
+    replica: Optional["HSFNode"] = None  # Only set if hte node is a REPLICA node
     attribute: "AttributeObject" = None
     # TODO: envelopes, clusters, shapes
-
-    replica: Optional["HSFNode"] = None  # if HSFNodeData.type == REPLICA
 
     @property
     def has_hierarchy(self):
@@ -302,17 +315,8 @@ class HSFNode:
             replica_name = f'HSFObject[{self.replica.node_data.type.name}, "{self.replica.node_data.name}", idx={self.replica.index}, children={len(self.replica.children)}]'
         return f'HSFNode[{self.node_data.type.name}, "{self.node_data.name}", idx={self.index}, replica={replica_name}, parent={parent_name}, children={len(self.children)}]'
 
-    class Iterator:
-        """TODO"""
-
-        def __iter__(self):
-            pass
-
-        def __next__(self):
-            pass
-
     def dfs(self, visited=None, level=0):
-        """TODO"""
+        """Iterate over this node in a depth-first search. Raises a ValueError in case of loops."""
         if visited is None:
             visited: set[HSFNode] = {id(self)}
         yield self, level
@@ -326,7 +330,9 @@ class HSFNode:
 
 @dataclass
 class HSFNodeData(HSFData):
-    """TODO
+    """
+    Raw data for an HSF-node.
+
     See (NodeObject): https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     See: MPLibrary.GCN.HSFObject
     """
@@ -343,7 +349,9 @@ class HSFNodeData(HSFData):
     symbol_index: int = -1
 
     base_transform: NodeTransform = field(default_factory=NodeTransform)
-    current_transform: NodeTransform = field(default_factory=NodeTransform)
+    current_transform: NodeTransform = field(
+        default_factory=NodeTransform
+    )  # purpose unknown
 
     # value below is ONLY used for REPLICA-nodes
     replica_index: int = -1
@@ -386,6 +394,43 @@ class HSFNodeData(HSFData):
     cluster_nrm_ofs: int = 0
 
 
+class HSFLightType(Enum):
+    """Type of light"""
+
+    SPOT = 0
+    POINT = 1
+    INFINITE = 2
+
+
+@dataclass
+class HSFNodeDataLight:
+    """Node data specific for lights"""
+
+    position: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+    target: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+    light_type: HSFLightType = HSFLightType.SPOT  # byte
+    r: int = 0  # byte
+    g: int = 0  # byte
+    b: int = 0  # byte
+    unk2c: float = 0
+    ref_distance: float = 0
+    ref_brightness: float = 0
+    cutoff: float = 0
+
+
+@dataclass
+class HSFNodeDataCamera:
+    """Node data specific for cameras"""
+
+    # TODO: first 16 bytes of node data are used as well
+    target: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+    position: tuple[float, float, float] = field(default_factory=lambda: (0, 0, 0))
+    aspect_ratio: float = 0
+    fov: float = 0
+    near: float = 0
+    far: float = 0
+
+
 class LightingChannelFlags(Enum):
     NO_LIGHTING = 0  # Flat shading
     LIGHTING = 1  # Lighting used
@@ -396,8 +441,8 @@ class LightingChannelFlags(Enum):
 
 
 @dataclass
-class MaterialObject(HSFData):  # struct
-    """TODO
+class MaterialObject(HSFData):
+    """TODO (is parsed but seems unused?)
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -417,12 +462,12 @@ class MaterialObject(HSFData):  # struct
     unk05: float = 1.0
     material_flags: int = 0
     texture_count = 0
-    attribute_index = 0
+    attribute_index = -1
 
 
 @dataclass
 class AttrTransform:
-    """TODO"""
+    """Transform"""
 
     scale: tuple[float, float] = field(default_factory=lambda: (1, 1))
     position: tuple[float, float] = field(default_factory=lambda: (0, 0))
@@ -430,7 +475,9 @@ class AttrTransform:
 
 @dataclass
 class AttributeObject(HSFData):
-    """TODO
+    """
+    Material attributes. Contains alpha state and texture data
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -478,8 +525,10 @@ class AttributeObject(HSFData):
 # TEXTURE
 ##############
 @dataclass
-class TextureInfo(HSFData):
-    """TODO
+class HSFTextureHeader(HSFData):
+    """
+    Header data for a texture.
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     See: https://github.com/KillzXGaming/MPLibrary/blob/master/MPLibrary/GCWii/HSF/Sections/Texture/TextureSection.cs
     """
@@ -487,7 +536,7 @@ class TextureInfo(HSFData):
     name_offset: int  # uint
     max_lod: int  # uint
     tex_format: int  # byte
-    bpp: int  # byte; to determine pallete types CI4/CI8
+    bpp: int  # byte; to determine palette types CI4/CI8
     width: int  # ushort
     height: int  # ushort
     palette_entries: int  # ushort
@@ -498,8 +547,10 @@ class TextureInfo(HSFData):
 
 
 @dataclass
-class PaletteInfo(HSFData):
-    """TODO
+class HSFPaletteHeader(HSFData):
+    """
+    Header data for a palette. Palettes are used by textures.
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -510,8 +561,10 @@ class PaletteInfo(HSFData):
 
 
 @dataclass
-class HSFMotionData(HSFData):
-    """TODO
+class HSFMotionDataHeader(HSFData):
+    """
+    Motions are used for animations.
+
     See: MotionDataSection > MotionData in MPLibrary
     """
 
@@ -524,7 +577,7 @@ class HSFMotionData(HSFData):
 
 
 class MotionTrackMode(Enum):
-    """TODO"""
+    """Type of animation"""
 
     NORMAL = 2
     OBJECT = 3
@@ -538,7 +591,11 @@ class MotionTrackMode(Enum):
 
 
 class MotionTrackEffect(Enum):
-    """TODO"""
+    """
+    Animation effects
+
+    See also: https://github.com/mariopartyrd/marioparty5
+    """
 
     AMBIENT_COLOR_R = 0
     AMBIENT_COLOR_G = 1
@@ -598,7 +655,7 @@ class MotionTrackEffect(Enum):
 
 
 class InterpolationMode(Enum):
-    """TODO"""
+    """Animation interpolation mode"""
 
     STEP = 0
     LINEAR = 1
@@ -610,7 +667,9 @@ class InterpolationMode(Enum):
 
 @dataclass
 class HSFTrackData:
-    """TODO
+    """
+    Keyframe data for animations
+
     See MotionDataSection > TrackData in MPLibrary
     """
 
@@ -627,7 +686,7 @@ class HSFTrackData:
 
 @dataclass
 class KeyFrame:
-    """TODO"""
+    """Normal keyframes"""
 
     frame: float
     value: float
@@ -635,7 +694,7 @@ class KeyFrame:
 
 @dataclass
 class BezierKeyFrame(KeyFrame):
-    """TODO"""
+    """Keyframe for bezier-interpolated animations"""
 
     slope_in: float
     slope_out: float

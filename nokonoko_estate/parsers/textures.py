@@ -18,7 +18,9 @@ def round_up_to_multiple(value: int, multiple: int):
 
 
 def get_texture_byte_size(format: GCNTextureFormat, width: int, height: int) -> int:
-    """TODO
+    """
+    Gets the total byte size for the raw texture data, given a texture format and dimensions.
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Tools/TLP.cs
     """
     match format:
@@ -43,7 +45,7 @@ def get_texture_byte_size(format: GCNTextureFormat, width: int, height: int) -> 
 
 
 class BitMapImage:
-    """TODO"""
+    """Helper class for converting TPL-images to regular pngs"""
 
     @classmethod
     def convert_from_texture(
@@ -55,44 +57,47 @@ class BitMapImage:
         palette_data: bytes,
         palette_format: GCNPaletteFormat | None,
     ) -> Image.Image:
-        """TODO"""
-        img = TPLImage()
+        """Converts a TPL-image to a bitmap image"""
+        helper = TPLImageHelper()
         rgba: list[int] = []
 
         if palette_format is not None:
             # Parse Palette
-            # print(f">> Palette format {palette_format.name}")
-            pallete_pixels = img.palette_to_rgba(palette_data, palette_format)
+            pallete_pixels = helper.palette_to_rgba(palette_data, palette_format)
 
         match format:
             case GCNTextureFormat.I4:
                 raise NotImplementedError("I4 not implemented")
             case GCNTextureFormat.I8:
-                rgba = img.from_i8(data, width, height)
+                rgba = helper.from_i8(data, width, height)
             case GCNTextureFormat.IA4:
                 raise NotImplementedError("IA4 not implemented")
             case GCNTextureFormat.IA8:
                 raise NotImplementedError("IA8 not implemented")
             case GCNTextureFormat.RGB565:
-                rgba = img.from_rgb565(data, width, height)
+                rgba = helper.from_rgb565(data, width, height)
             case GCNTextureFormat.RGB5A3:
-                rgba = img.from_rgb5a3(data, width, height)
+                rgba = helper.from_rgb5a3(data, width, height)
             case GCNTextureFormat.RGBA32:
                 raise NotImplementedError("RGBA32 not implemented")
             case GCNTextureFormat.C4:
-                rgba = img.from_c4(data, width, height, pallete_pixels)
+                rgba = helper.from_c4(data, width, height, pallete_pixels)
             case GCNTextureFormat.C8:
-                rgba = img.from_c8(data, width, height, pallete_pixels)
+                rgba = helper.from_c8(data, width, height, pallete_pixels)
             case GCNTextureFormat.CMPR:
-                rgba = img.from_cmpr(data, width, height)
+                rgba = helper.from_cmpr(data, width, height)
             case _:
                 raise NotImplementedError(f"Cannot decode texture format {format}")
-        return img.rgba_to_image(rgba, width, height)
+        return helper.rgba_to_image(rgba, width, height)
 
 
-class TPLImage:
+class TPLImageHelper:
     """
+    A Texture Palette Library consists of multiple images. This is a helper class
+    to aid in converting it to regular bitmap images.
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Tools/TLP.cs
+    See conversion methods in: https://wiki.tockdom.com/wiki/TPL_(File_Format)
     """
 
     def _average_rgb565_colors(self, c0: int, c1: int, weight_0=1, weight_1=1) -> int:
@@ -111,8 +116,6 @@ class TPLImage:
         cg = (weight_0 * g0 + weight_1 * g1) // (weight_0 + weight_1)
         # print(f"({weight_0} * {g0} + {weight_1} * {g1}) // ({weight_0 + weight_1})")
         # print(g0, g1, cg * 0x4, cg & 0xFFFF)
-        # print(weight_0, weight_1)
-        # exit(0)
 
         # Average B
         b0 = c0 >> 0 & 0x1F
@@ -130,7 +133,12 @@ class TPLImage:
         block_size: tuple[int, int],
         palette: list[int] | None = None,
     ) -> list[int]:
-        """TODO"""
+        """
+        Converts texture data from the game's (blocked) format to a regular series of bytes.
+        Uses `pixel_fn` to convert pixel data to raw RGBA-values.
+
+        See: https://wiki.tockdom.com/wiki/Image_Formats
+        """
         assert (
             bpp % 8 == 0 or bpp == 4
         ), f"BPP ({bpp}) was not a multiple of 8 (not a multiple of a byte) nor 4 (a nibble)"
@@ -168,16 +176,10 @@ class TPLImage:
                             + block_y * (width * block_height)
                         )
                         output_pixels[index] = pixel_fn(pixel, palette)
-                        # if i > 8:
-                        #     break
-                        # i += 1
-                        # print(
-                        #     f"index={index}\ti={i}, block_x={block_x}, block_y={block_y}, x={x}, y={y}"
-                        # )
         return output_pixels
 
     def palette_to_rgba(self, data: bytes, palette_format: GCNPaletteFormat):
-        """TODO"""
+        """Parses a palette and outputs raw RGBA-colors (one int per color)"""
         palette_data = BytesIO(data)
         format_fn: Callable[[int], int] = None
         match palette_format:
@@ -203,7 +205,7 @@ class TPLImage:
         return pixel << 24 | pixel << 16 | pixel << 8 | 0xFF << 0
 
     def from_i8(self, data: bytes, width: int, height: int) -> list[int]:
-        """TODO"""
+        """Converts I8 texture data"""
         return self._from_gcn_encoding(
             data, self._i8_to_rgba, (width, height), 8, (8, 4)
         )
@@ -218,9 +220,6 @@ class TPLImage:
             b = (pixel >> 0 & 0x1F) * 255 // 0x1F
         else:
             # Alpha component
-            # if pixel & 0b1111000000000000:
-            #     print(pixel)
-            #     exit(0)
             a = (pixel >> 12 & 0x07) * 255 // 0x07
             r = (pixel >> 8 & 0x0F) * 255 // 0x0F
             g = (pixel >> 4 & 0x0F) * 255 // 0x0F
@@ -228,7 +227,7 @@ class TPLImage:
         return r << 24 | g << 16 | b << 8 | a << 0
 
     def from_rgb5a3(self, data: bytes, width: int, height: int) -> list[int]:
-        """TODO"""
+        """Converts RGBA5A3 texture data"""
         return self._from_gcn_encoding(
             data, self._rgb5a3_to_rgba, (width, height), 16, (4, 4)
         )
@@ -244,7 +243,7 @@ class TPLImage:
         return r << 24 | g << 16 | b << 8 | a << 0
 
     def from_rgb565(self, data: bytes, width: int, height: int) -> list[int]:
-        """TODO"""
+        """Converts RGB565 texture data"""
 
         return self._from_gcn_encoding(
             data, self._rgb565_to_rgba, (width, height), 16, (4, 4)
@@ -258,7 +257,7 @@ class TPLImage:
     def from_c4(
         self, data: bytes, width: int, height: int, palette: list[int]
     ) -> list[int]:
-        """TODO"""
+        """Converts C4 texture data"""
         return self._from_gcn_encoding(
             data, self._palette_to_rgba, (width, height), 4, (8, 8), palette
         )
@@ -266,13 +265,13 @@ class TPLImage:
     def from_c8(
         self, data: bytes, width: int, height: int, palette: list[int]
     ) -> list[int]:
-        """TODO"""
+        """Converts C8 texture data"""
         return self._from_gcn_encoding(
             data, self._palette_to_rgba, (width, height), 8, (8, 4), palette
         )
 
     def from_cmpr(self, data: bytes, width: int, height: int) -> list[int]:
-        """TODO"""
+        """Converts CMPR texture data"""
         output_pixels: list[int] = [0] * (width * height)
         img_data = BytesIO(data)
         # Block size is 8*8
@@ -317,7 +316,7 @@ class TPLImage:
         return output_pixels
 
     def rgba_to_image(self, rgba: list[int], width: int, height: int) -> Image.Image:
-        """TODO"""
+        """Converts a raw RGBA-texture to an image"""
 
         img = Image.frombytes(
             "RGBA",

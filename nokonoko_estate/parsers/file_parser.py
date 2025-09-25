@@ -11,7 +11,7 @@ from nokonoko_estate.formats.formats import (
     BezierKeyFrame,
     HSFAttributes,
     HSFNode,
-    HSFMotionData,
+    HSFMotionDataHeader,
     HSFTrackData,
     InterpolationMode,
     KeyFrame,
@@ -25,9 +25,9 @@ from nokonoko_estate.formats.formats import (
     AttributeObject,
     MeshObject,
     HSFNodeData,
-    PaletteInfo,
+    HSFPaletteHeader,
     PrimitiveObject,
-    TextureInfo,
+    HSFTextureHeader,
     Vertex,
 )
 from nokonoko_estate.parsers.base import HSFParserBase
@@ -39,8 +39,8 @@ from nokonoko_estate.parsers.parsers import (
     MaterialObjectParser,
     AttributeParser,
     MotionDataHeaderParser,
-    PaletteInfoParser,
-    TextureInfoParser,
+    PaletteHeaderParser,
+    TextureHeaderParser,
     VertexParser,
 )
 from nokonoko_estate.parsers.textures import BitMapImage, get_texture_byte_size
@@ -78,15 +78,27 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         return self._fl.parselog
 
     def parse_from_file(self) -> HSFFile:
-        """TODO"""
+        """Parse data from a file"""
         sz = os.path.getsize(self.filepath)
         with open(self.filepath, "rb") as fl:
             self._fl = ParserLogger(fl, sz)
-            self.parse()
-            return self._output_file()
+            return self.parse()
 
     def _output_file(self):
         """TODO"""
+
+        # for i, node in enumerate(self._nodes):
+        #     if node.node_data.type == HSFNodeType.REPLICA:
+        #         print(
+        #             node.node_data.type.name,
+        #             i,
+        #             node,
+        #             node.node_data.symbol_index,
+        #         )
+        #         # print("\t" + str(node.parent.node_data))
+        #         print("^-- FOUND REPLICA NODE --^")
+        #         # exit(-1)
+        # print("Didn't find replica...")
 
         for node, level in self._root_node.dfs():
             print(
@@ -245,11 +257,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         #         mo.MultiWeights.AddRange(reader.ReadStructArray<RiggingMultiWeight>(mb.Count));
         #     }
         # }
+        return self._output_file()
 
     def _parse_primitives(
         self, headers: list[AttributeHeader]
     ) -> list[HSFAttributes[PrimitiveObject]]:
-        """TODO"""
+        """Parses primitives from the HSF-file"""
         base_ofs = self._fl.tell()
         extra_ofs = self._fl.tell()
         for attr in headers:
@@ -333,7 +346,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
     def _parse_positions(
         self, headers: list[AttributeHeader]
     ) -> list[HSFAttributes[tuple[float, float, float]]]:
-        """TODO"""
+        """Parse vertex positions."""
         start_ofs = self._fl.tell()
         result: list[HSFAttributes[tuple[float, float, float]]] = []
         for attr in headers:
@@ -350,7 +363,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         return result
 
     def _parse_normals(self, headers: list[AttributeHeader], nodes: list[HSFNode]):
-        """TODO"""
+        """Parse vertex normals."""
         start_ofs = self._fl.tell()
         result: list[HSFAttributes[tuple[float, float, float]]] = []
 
@@ -401,6 +414,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
     def _parse_uvs(
         self, headers: list[AttributeHeader]
     ) -> list[HSFAttributes[tuple[float, float]]]:
+        """Parse UV-coordinates"""
         start_ofs = self._fl.tell()
 
         result: list[HSFAttributes[tuple[float, float]]] = []
@@ -420,6 +434,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
     def _parse_colors(
         self, headers: list[AttributeHeader]
     ) -> list[HSFAttributes[tuple[float, float, float, float]]]:
+        """Parse vertex colors"""
         start_ofs = self._fl.tell()
 
         result: list[HSFAttributes[tuple[float, float, float, float]]] = []
@@ -441,8 +456,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         return result
 
     def _parse_motions(self):
-        """TODO"""
-        motions: list[HSFMotionData] = self._parse_array(
+        """Parse animation data"""
+        motions: list[HSFMotionDataHeader] = self._parse_array(
             MotionDataHeaderParser, self._header.motions.length
         )
         start_ofs = self._fl.tell()
@@ -522,17 +537,21 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 # print(f"\t{name} > {track.keyframe_count} vs {len(keyframes)}, {track}")
 
     def _parse_textures(self):
-        """TODO"""
+        """Parse textures"""
         tex_len = self._header.textures.length
         pal_ofs = self._header.palettes.offset
         pal_len = self._header.palettes.length
 
-        tex_infos: list[TextureInfo] = self._parse_array(TextureInfoParser, tex_len)
+        tex_infos: list[HSFTextureHeader] = self._parse_array(
+            TextureHeaderParser, tex_len
+        )
         ofs_post_tex = self._fl.tell()
         print(f"Identified {tex_len} texture(s)")
 
         self._fl.seek(pal_ofs, io.SEEK_SET)
-        pal_infos: list[PaletteInfo] = self._parse_array(PaletteInfoParser, pal_len)
+        pal_infos: list[HSFPaletteHeader] = self._parse_array(
+            PaletteHeaderParser, pal_len
+        )
         ofs_post_pal = self._fl.tell()
         print(f"Identified {pal_len} palette(s)")
         # print(
@@ -595,7 +614,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 self._textures.append((tex_name, bitmap))
 
     def _parse_nodes(self):
-        """TODO"""
+        """Parse the HSF-tree consisting of nodes"""
         node_len = self._header.nodes.length
         nodes: list[HSFNode] = []
         for i in range(node_len):
@@ -614,7 +633,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
     def _setup_node_references(self, node: HSFNode):
         """
-        Ties all node index references to related objects.
+        Ties all node index references to related objects, such as
+        the mesh-data, referenced replica-node, or parent/child relationships.
+
         Requires the following to be set:
         - `self._nodes`
         - `self._primitives`
@@ -623,12 +644,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         - `self._uvs`
         - `self._colors`
         """
-        if (
-            node.node_data.type == HSFNodeType.MESH
-            or node.node_data.primitives_index in (270, 276)
-            # or node.node_data.type == HSFNodeType.REPLICA
-        ):
+        if node.node_data.type == HSFNodeType.MESH:
             self._setup_mesh_references(node)
+
+        # Setup node to replicate
+        if node.node_data.replica_index != -1:
+            node.replica = self._nodes[node.node_data.replica_index]
 
         if not node.has_hierarchy:
             # Cameras and Lights don't have parents/children
@@ -646,12 +667,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             child = self._nodes[child_index]
             node.children.append(child)
 
-        # Setup node to replicate
-        if node.node_data.replica_index != -1:
-            node.replica = self._nodes[node.node_data.replica_index]
-
     def _setup_mesh_references(self, node: HSFNode):
-        """TODO"""
+        """
+        Ties all indices to the relevant data entries for the given mesh.
+        E.g. primitive_index, position_index, etc.
+        """
         # Primitives
         primitives_index = node.node_data.primitives_index
         assert (
@@ -674,7 +694,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         # UV coords
         uv_index = node.node_data.uv_index
-        # UVs may not be present
         uv_indices_data = []
         if uv_index != -1:
             uv_indices_data = self._uvs[uv_index].data

@@ -10,10 +10,10 @@ from nokonoko_estate.formats.formats import (
     LightingChannelFlags,
     MaterialObject,
     AttributeObject,
-    HSFMotionData,
+    HSFMotionDataHeader,
     NodeTransform,
-    PaletteInfo,
-    TextureInfo,
+    HSFPaletteHeader,
+    HSFTextureHeader,
     Vertex,
 )
 from nokonoko_estate.parsers.base import HSFParserBase
@@ -118,6 +118,11 @@ class HSFNodeDataParser(HSFParserBase[HSFNodeData]):
             HSFNodeType.LIGHT,
         ):
             print(f"Unknown node type: {node_data}")
+
+        # if node_data.type in (HSFNodeType.LIGHT, HSFNodeType.CAMERA):
+        #     print("skip camera")
+        #     return node_data
+
         node_data.parent_index = self._parse_index()
         node_data.children_count = self._parse_int()
         node_data.symbol_index = self._parse_index()
@@ -177,21 +182,21 @@ class HSFNodeDataParser(HSFParserBase[HSFNodeData]):
 
 
 class AttributeHeaderParser(HSFParserBase[AttributeHeader]):
-    """TODO"""
+    """Parses material attribute headers"""
 
     _data_type = AttributeHeader
     struct_formatting = ">iii"
 
 
 class VertexParser(HSFParserBase[Vertex]):
-    """TODO"""
+    """Parses Vertices"""
 
     _data_type = Vertex
     struct_formatting = ">hhhh"
 
 
 class AttributeParser(HSFParserBase[AttributeObject]):
-    """TODO"""
+    """Parses material attributes"""
 
     _data_type = AttributeObject
 
@@ -243,7 +248,7 @@ class AttributeParser(HSFParserBase[AttributeObject]):
 
 
 class MaterialObjectParser(HSFParserBase[MaterialObject]):
-    """TODO"""
+    """Parses materials"""
 
     _data_type = MaterialObject
 
@@ -277,22 +282,22 @@ class MaterialObjectParser(HSFParserBase[MaterialObject]):
         return mat
 
 
-class TextureInfoParser(HSFParserBase[TextureInfo]):
-    """TODO"""
+class TextureHeaderParser(HSFParserBase[HSFTextureHeader]):
+    """Pares texture headers"""
 
-    _data_type = TextureInfo
+    _data_type = HSFTextureHeader
     struct_formatting = ">IIBBHHHIiII"
 
 
-class PaletteInfoParser(HSFParserBase[PaletteInfo]):
-    """TODO"""
+class PaletteHeaderParser(HSFParserBase[HSFPaletteHeader]):
+    """Parses palette headers"""
 
-    _data_type = PaletteInfo
+    _data_type = HSFPaletteHeader
     struct_formatting = ">IiiI"
 
 
-class MotionDataHeaderParser(HSFParserBase[HSFMotionData]):
-    """TODO"""
+class MotionDataHeaderParser(HSFParserBase[HSFMotionDataHeader]):
+    """Parses animation headers"""
 
-    _data_type = HSFMotionData
+    _data_type = HSFMotionDataHeader
     struct_formatting = ">IIIf"

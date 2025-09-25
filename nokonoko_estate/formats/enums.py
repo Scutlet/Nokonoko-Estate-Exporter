@@ -41,7 +41,7 @@ class GCNPaletteFormat(Enum):
 
 
 class CombinerBlend(Enum):
-    """TODO"""
+    """Blend modes for Material Attributes"""
 
     # Mixes current and last stages by texture alpha with a new stage
     TRANSPARENCY_MIX = 0

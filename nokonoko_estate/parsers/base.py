@@ -10,7 +10,14 @@ T2 = TypeVar("T", bound=HSFData)
 
 
 class HSFParserBase(Generic[T]):
-    """TODO"""
+    """
+    A generic class for parsing any data from an HSF-file.
+    Contains a few helper functions.
+
+    By setting `struct_formatting`, allows using Python's `struct` package to parse bytes.
+    E.g. `struct_formatting = ">iIf"` to parse a Big Endian struct consisting of a `signed integer`,
+    `unsigned integer`, and `float` respectively.
+    """
 
     _data_type: type[T] = HSFData
 
@@ -26,7 +33,7 @@ class HSFParserBase(Generic[T]):
     struct_formatting: str = ""
 
     def parse(self) -> T:
-        """TODO"""
+        """Parses the data according to `self.struct_formatting`. Should be overridden if no `struct_formatting` is defined"""
         if not self.struct_formatting:
             raise NotImplementedError(
                 f"{self.__class__.__name__}.struct_formatting was not set. Custom parsing should be implemented."
@@ -70,7 +77,7 @@ class HSFParserBase(Generic[T]):
             while (char := self._fl.read(0x01)) != b"\x00":
                 string += char
             return string.decode(format)
-        return "METHOD-NOT-IMPLEMENTED"
+        raise ValueError("Size not provided when parsing a string")
 
     def _parse_from_stringtable(self, ofs: int, size=-1, format="utf-8"):
         """Parse a string from a stringtable"""
@@ -86,7 +93,7 @@ class HSFParserBase(Generic[T]):
     def _parse_array(
         self, parser_cl: type["HSFParserBase[T2]"], count: int
     ) -> list[T2]:
-        """TODO"""
+        """Parse a sequence of data using another parser."""
         parser = parser_cl(self._fl, self._header)
         data: list[T2] = []
         for _ in range(count):

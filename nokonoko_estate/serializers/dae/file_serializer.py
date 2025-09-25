@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime
 import logging
+from typing import Literal
 import xml.etree.ElementTree as ET
 
 from PIL import Image
@@ -34,7 +35,7 @@ class HSFFileDAESerializer:
         self.output_path = output_filepath
 
     def serialize(self):
-        """TODO"""
+        """Serialize the HSF-file (`self.data`) and output it to `self.output_filepath`"""
         root = ET.Element("COLLADA")
         root.set("xmlns", "http://www.collada.org/2005/11/COLLADASchema")
         root.set("version", "1.4.1")
@@ -99,7 +100,6 @@ class HSFFileDAESerializer:
         tree = ET.ElementTree(root)
         tree.write(self.output_path, encoding="utf-8", xml_declaration=True)
         # b_xml = ET.tostring(root)
-        # print()
         # print(b_xml.decode("utf-8"))
 
     def serialize_image(
@@ -118,13 +118,13 @@ class HSFFileDAESerializer:
         return image
 
     def serialize_material(self, material: AttributeObject, index: int) -> ET.Element:
-        """TODO"""
+        """Serialize <material> nodes. References <effects> (texture info)"""
         mat = ET.Element("material", id=f"material_{index:03}")
         ET.SubElement(mat, "instance_effect", url=f"#Effect_material_{index:03}")
         return mat
 
     def serialize_effects(self, material: AttributeObject, index: int) -> ET.Element:
-        """TODO"""
+        """Serialize <effect> nodes to list texture information (filename, format, UV-wrap, etc.)"""
         effect = ET.Element("effect", id=f"Effect_material_{index:03}")
         profile = ET.SubElement(effect, "profile_COMMON")
         surface_param = ET.SubElement(
@@ -179,27 +179,29 @@ class HSFFileDAESerializer:
         return effect
 
     def serialize_geometry(self, node: HSFNode) -> ET.Element:
-        """TODO"""
+        """
+        Serializes a single <geometry> node. This basically represents a single mesh,
+        which can be instantiated multiple times. E.g. for REPLICA nodes
+        """
+        assert node.node_data.type == HSFNodeType.MESH
         mesh_obj = node.mesh_data
         uid = f"{mesh_obj.name}__{node.index}"
 
         geometry = ET.Element("geometry", id=f"{uid}-mesh", name=uid)
         mesh = ET.SubElement(geometry, "mesh")
         mesh.append(self.serialize_positions(mesh_obj, node.index))
+        # Normals, UVs, colors may not exist. Only serialize them if they do
         if mesh_obj.normals:
             mesh.append(self.serialize_normals(mesh_obj, node.index))
         if mesh_obj.uvs:
-            # Only serialize UVs if there are any
             mesh.append(self.serialize_uvs(mesh_obj, node.index))
-        # TODO COLORS
         if mesh_obj.colors:
             mesh.append(self.serialize_colors(mesh_obj, node.index))
-            print("has vertex colors: " + mesh_obj.name + " " + str(node.index))
 
         vertices = ET.SubElement(mesh, "vertices", id=f"{uid}-vertex")
         ET.SubElement(vertices, "input", semantic="POSITION", source=f"#{uid}-position")
 
-        # Group primitives by material
+        # Group primitives by material and whether they have UVs/colors/normals
         triangle_dict: dict[ColladaSetIdx, list[ColladaTriangle]] = defaultdict(list)
         polylist_dict: dict[ColladaSetIdx, list[ColladaPolygon]] = defaultdict(list)
         self._generate_vertices_from_primitives(
@@ -209,13 +211,14 @@ class HSFFileDAESerializer:
         self._sanity_check_collada_sets(mesh_obj, triangle_dict)
         self._sanity_check_collada_sets(mesh_obj, polylist_dict)
 
+        # Define quads
         for elem in self._serialize_primitive_dict(
-            "polylist", polylist_dict, mesh_obj, uid, include_vcount=True
+            "polylist", polylist_dict, uid, include_vcount=True
         ):
             mesh.append(elem)
-        for elem in self._serialize_primitive_dict(
-            "triangles", triangle_dict, mesh_obj, uid
-        ):
+
+        # Define triangles
+        for elem in self._serialize_primitive_dict("triangles", triangle_dict, uid):
             mesh.append(elem)
         return geometry
 
@@ -225,8 +228,10 @@ class HSFFileDAESerializer:
         triangle_dict: dict[ColladaSetIdx, list[ColladaTriangle]],
         polylist_dict: dict[ColladaSetIdx, list[ColladaPolygon]],
     ) -> None:
-        """TODO"""
-
+        """
+        Generate sets of matching primitives. I.e. matching material, and whether it has colors/uvs/normals.
+        Each set is exported to its own <polylist> or <triangle> element later on
+        """
         for primitive in primitives:
             attribute_index = self._data.materials[
                 primitive.material_index
@@ -300,8 +305,6 @@ class HSFFileDAESerializer:
         v = str(vertex.position_index)
         if include_normals:
             v += " " + str(vertex.normal_index)
-        else:
-            assert False, "VERTEX DOES NOT HAVE NORMALS!!!"
         if include_uvs:
             v += " " + str(vertex.uv_index)
         if include_colors:
@@ -310,13 +313,14 @@ class HSFFileDAESerializer:
 
     def _serialize_primitive_dict(
         self,
-        name: str,
+        name: Literal["triangles", "polylist"],
         prim_dict: dict[ColladaSetIdx, list[list[Vertex]]],
-        mesh_obj: MeshObject,
         uid: str,
         include_vcount=False,
     ) -> list[ET.Element]:
-        """TODO"""
+        """
+        Serializes sets of primitives to a series of <triangle> or <polylist> elements.
+        """
         xml_elems = []
         for (
             attribute_index,
@@ -367,7 +371,7 @@ class HSFFileDAESerializer:
         include_uvs=True,
         include_colors=True,
     ) -> list[ET.Element]:
-        """TODO"""
+        """Serializes <input> elements. These are used by geometry-elements to correctly index into the right data"""
         offset = 0
         inputs = [
             ET.Element(
@@ -412,7 +416,7 @@ class HSFFileDAESerializer:
     def primitive_triangle_to_collada(
         self, primitive: PrimitiveObject
     ) -> ColladaTriangle:
-        """TODO"""
+        """Converts a primitive triangle to a triangle in COLLADA-format (taking care of the winding order)"""
         assert (
             primitive.primitive_type == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE
         )
@@ -425,7 +429,7 @@ class HSFFileDAESerializer:
         )
 
     def primitive_quad_to_collada(self, primitive: PrimitiveObject) -> ColladaPolygon:
-        """TODO"""
+        """Converts a primitive quad to a polygon in COLLADA format (taking care of the winding order)"""
         assert primitive.primitive_type == PrimitiveObject.PrimitiveType.PRIMITIVE_QUAD
         # The winding order of vertices produced is counter-clockwise and describes the front side of each polygon
         # Order in HSF-file: 0 1 3 2
@@ -439,7 +443,7 @@ class HSFFileDAESerializer:
     def primtive_triangle_strip_to_collada(
         self, primitive: PrimitiveObject
     ) -> list[ColladaTriangle]:
-        """TODO"""
+        """Converts a primitive triangle strip to a series of COLLADA-triangles (taking care of the winding order)"""
         assert (
             primitive.primitive_type
             == PrimitiveObject.PrimitiveType.PRIMITIVE_TRIANGLE_STRIP
@@ -470,7 +474,7 @@ class HSFFileDAESerializer:
         return triangles
 
     def serialize_positions(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
-        """TODO"""
+        """Serializes the vertex positions of all vertices in a mesh"""
         uid = f"{mesh_obj.name}__{obj_index}"
         source = self.serialize_vertex_data_array(mesh_obj.positions, f"{uid}-position")
         technique = ET.SubElement(source, "technique_common")
@@ -487,7 +491,7 @@ class HSFFileDAESerializer:
         return source
 
     def serialize_normals(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
-        """TODO"""
+        """Serializes the vertex normals of all vertices in a mesh"""
         uid = f"{mesh_obj.name}__{obj_index}"
         source = self.serialize_vertex_data_array(mesh_obj.normals, f"{uid}-normals")
         technique = ET.SubElement(source, "technique_common")
@@ -504,7 +508,7 @@ class HSFFileDAESerializer:
         return source
 
     def serialize_uvs(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
-        """TODO"""
+        """Serializes the texture coordinates (uvs) of all vertices in a mesh"""
         uid = f"{mesh_obj.name}__{obj_index}"
         source = self.serialize_vertex_data_array(
             # COLLADA assumes (1.0, 0.0) is the top-left corner; HSF assumes that's bottom-left
@@ -524,7 +528,7 @@ class HSFFileDAESerializer:
         return source
 
     def serialize_colors(self, mesh_obj: MeshObject, obj_index: int) -> ET.Element:
-        """TODO"""
+        """Serializes the vertex colors of all vertices in a mesh"""
         uid = f"{mesh_obj.name}__{obj_index}"
         source = self.serialize_vertex_data_array(mesh_obj.colors, f"{uid}-colors")
         technique = ET.SubElement(source, "technique_common")
@@ -544,7 +548,7 @@ class HSFFileDAESerializer:
     def serialize_vertex_data_array(
         self, data: list[tuple[int | float, ...]], name: str
     ):
-        """TODO"""
+        """Serializes a list of vertex data (e.g. coordinates or colors), flattening it and rounding it to 6 decimal places"""
         num_elements = 0 if len(data) == 0 else len(data[0])
         source = ET.Element("source", id=name)
         data_elem = ET.SubElement(
@@ -585,13 +589,17 @@ class HSFFileDAESerializer:
         return " ".join([str(i) for i in mtx.as_raw()])
 
     def serialize_visual_scene_replica(self, node: HSFNode) -> list[ET.Element]:
-        """TODO
-        Copies over all the descendants of the replicated node
         """
+        Serializes a REPLICA-node by copying over all descendants of the replicated node.
+        """
+        assert node.node_data.type == HSFNodeType.REPLICA
         res = []
-        for child, _ in filter(
-            lambda n: n[0].node_data.type == HSFNodeType.MESH, node.replica.dfs()
-        ):
+        for child, _ in node.replica.dfs():
+            if child.node_data.type not in (HSFNodeType.MESH, HSFNodeType.NULL1):
+                print(
+                    f"WARN: Replica node {node.index} ({node.node_data.name}) attempts to copy over non-MESH child {child.index} ({child.node_data.name}; {child.node_data.type.name}) of replicated node {node.replica.index} ({node.replica.node_data.name})"
+                )
+                continue
             res.append(
                 self.serialize_visual_scene_mesh(
                     child,
@@ -610,7 +618,11 @@ class HSFFileDAESerializer:
         transform: TransformationMatrix = None,
         name: str = None,
     ) -> ET.Element:
-        """TODO"""
+        """
+        Serialize an instance of a <geometry>. If `transform` is provided, uses that instead
+        of the `node`'s transform.
+        """
+        assert node.node_data.type == HSFNodeType.MESH
         uid = f"{node.mesh_data.name}__{node.index}"
         if name is None:
             name = uid
@@ -648,17 +660,3 @@ class HSFFileDAESerializer:
         #   </bind_material>
 
         return xml_node
-
-        # <node id="stair" name="stair" type="NODE">
-        #     <matrix sid="transform">1 0 0 -233.378 0 1 0 -208.1444 0 0 1 786.8199 0 0 0 1</matrix>
-        #     <instance_geometry url="#pPlane212__mtr_Road_Slope_001-mesh" name="stair">
-        #     <bind_material>
-        #         <technique_common>
-        #         <instance_material symbol="mtr_Road_Slope-material" target="#mtr_Road_Slope-material">
-        #             <bind_vertex_input semantic="pPlane212__mtr_Road_Slope-geometry-TEXCOORD" input_semantic="TEXCOORD" input_set="0"/>
-        #             <bind_vertex_input semantic="pPlane212__mtr_Road_Slope-geometry-TEXCOORD1" input_semantic="TEXCOORD" input_set="1"/>
-        #         </instance_material>
-        #         </technique_common>
-        #     </bind_material>
-        #     </instance_geometry>
-        # </node>
