@@ -10,8 +10,10 @@ from nokonoko_estate.formats.formats import (
     AttributeHeader,
     BezierKeyFrame,
     HSFAttributes,
+    HSFEnvelope,
     HSFNode,
     HSFMotionDataHeader,
+    HSFRigHeader,
     HSFTrackData,
     InterpolationMode,
     KeyFrame,
@@ -36,6 +38,12 @@ from nokonoko_estate.parsers.parsers import (
     AttributeParser,
     MotionDataHeaderParser,
     PaletteHeaderParser,
+    RigHeaderParser,
+    RiggingDoubleBindParser,
+    RiggingDoubleWeightParser,
+    RiggingMultiBindParser,
+    RiggingMultiWeightParser,
+    RiggingSingleBindParser,
     TextureHeaderParser,
     VertexParser,
 )
@@ -61,6 +69,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._normals: list[HSFAttributes[tuple[float, float, float]]] = []
         self._uvs: list[HSFAttributes[tuple[float, float]]] = []
         self._colors: list[HSFAttributes[tuple[float, float, float, float]]] = []
+        self._envelopes: list[HSFEnvelope] = []
 
         self._textures: list[tuple[str, Image.Image]] = []
         self._materials: list[MaterialObject] = []
@@ -178,6 +187,15 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             self._symbols.append(self._parse_int(signed=True))
         print(f"Identified {len(self._symbols)} symbol(s)")
 
+        # Skeletons
+        print(f"Identified {self._header.skeletons.length} skeleton(s)")
+        self._fl.seek(self._header.skeletons.offset, io.SEEK_SET)
+        self._parse_skeletons()
+
+        # Rigs/cenv
+        self._fl.seek(self._header.rigs.offset, io.SEEK_SET)
+        self._envelopes = self._parse_rigs()
+
         # Setup node references; these make it easier to reference other data
         for node in self._nodes:
             self._setup_node_references(node)
@@ -186,77 +204,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             self._verify_node_references(node)
 
         # Motions
-        self._fl.seek(self._header.motions.offset)
+        self._fl.seek(self._header.motions.offset, io.SEEK_SET)
         self._parse_motions()
 
         # Textures
         self._fl.seek(self._header.textures.offset, io.SEEK_SET)
         self._parse_textures()
-
-        # ???
-        end_ofs = self._header.rigs.offset + self._header.rigs.length * 0x24
-        self._fl.seek(self._header.rigs.offset)
-
-        # meshnames = list(self._mesh_objects.keys())
-        for i in range(self._header.rigs.length):
-            # mesh_obj = self._mesh_objects[meshnames[i]]
-            raise NotImplementedError("Rigging not implemented")
-
-        # uint endOffset = rigOffset + (uint)(rigCount * 0x24);
-        # reader.Position = rigOffset;
-        # var meshName = MeshObjects.Keys.ToArray();
-        # for (int i = 0; i < rigCount; i++)
-        # {
-        #     var mo = MeshObjects[meshName[i]];
-        #     reader.Position += 4; // 0xCCCCCCCC
-        #     var singleBindOffset = reader.ReadUInt32();
-        #     var doubleBindOffset = reader.ReadUInt32();
-        #     var multiBindOffset = reader.ReadUInt32();
-        #     var singleBindCount = reader.ReadInt32();
-        #     var doubleBindCount = reader.ReadInt32();
-        #     var multiBindCount = reader.ReadInt32();
-        #     var vertexCount = reader.ReadInt32();
-        #     mo.SingleBind = reader.ReadInt32();
-        #     //Console.WriteLine($"{mo.Name} {Nodes[mo.SingleBind].Name}");
-
-        #     var temp = reader.Position;
-
-        #     reader.Position = endOffset + singleBindOffset;
-        #     mo.SingleBinds.AddRange(reader.ReadStructArray<RiggingSingleBind>(singleBindCount));
-
-        #     reader.Position = endOffset + doubleBindOffset;
-        #     mo.DoubleBinds.AddRange(reader.ReadStructArray<RiggingDoubleBind>(doubleBindCount));
-
-        #     reader.Position = endOffset + multiBindOffset;
-        #     mo.MultiBinds.AddRange(reader.ReadStructArray<RiggingMultiBind>(multiBindCount));
-
-        #     if(i != rigCount - 1)
-        #         reader.Position = temp;
-        # }
-
-        # var weightStart = reader.Position;
-        # for (int i = 0; i < rigCount; i++)
-        # {
-        #     var mo = MeshObjects[meshName[i]];
-
-        #     foreach (var mb in mo.DoubleBinds)
-        #     {
-        #         reader.Position = (uint)(weightStart + mb.WeightOffset);
-        #         mo.DoubleWeights.AddRange(reader.ReadStructArray<RiggingDoubleWeight>(mb.Count));
-        #     }
-        # }
-
-        # weightStart = reader.Position;
-        # for (int i = 0; i < rigCount; i++)
-        # {
-        #     var mo = MeshObjects[meshName[i]];
-
-        #     foreach (var mb in mo.MultiBinds)
-        #     {
-        #         reader.Position = (uint)(weightStart + mb.WeightOffset);
-        #         mo.MultiWeights.AddRange(reader.ReadStructArray<RiggingMultiWeight>(mb.Count));
-        #     }
-        # }
         return self._output_file()
 
     def _parse_primitives(
@@ -532,6 +485,64 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                                 ), f"Cannot parse interpolation mode {track.mode.name}"
                 # print(f"\t{name} > {track.keyframe_count} vs {len(keyframes)}, {track}")
 
+    def _parse_skeletons(self):
+        """Parses skeletons"""
+
+        raise NotImplementedError("skeletons not supported")
+
+    def _parse_rigs(self):
+        """Parses rigs/cenv"""
+        rig_len = self._header.rigs.length
+        print(f"Identified {rig_len} rig(s)")
+        rig_headers: list[HSFRigHeader] = self._parse_array(RigHeaderParser, rig_len)
+        start_ofs = self._fl.tell()
+
+        envelopes: list[HSFEnvelope] = []
+        for header in rig_headers:
+            self._fl.seek(start_ofs + header.single_bind_offset, io.SEEK_SET)
+            single_binds = self._parse_array(
+                RiggingSingleBindParser, header.single_bind_count
+            )
+
+            self._fl.seek(start_ofs + header.double_bind_offset, io.SEEK_SET)
+            double_binds = self._parse_array(
+                RiggingDoubleBindParser, header.double_bind_count
+            )
+
+            self._fl.seek(start_ofs + header.multi_bind_offset, io.SEEK_SET)
+            multi_binds = self._parse_array(
+                RiggingMultiBindParser, header.multi_bind_count
+            )
+
+            envelopes.append(
+                HSFEnvelope(
+                    name=header.name,
+                    single_binds=single_binds,
+                    double_binds=double_binds,
+                    multi_binds=multi_binds,
+                    vertex_count=header.vertex_count,
+                    copy_count=header.single_bind,
+                )
+            )
+
+        # Parse weights corresponding to the binds
+        weight_start_ofs = self._fl.tell()
+        for cenv in envelopes:
+            # print(cenv.double_binds)
+            for bind in cenv.double_binds:
+                # print("\t", bind.count, f"{bind.weight_offset:#x}")
+                self._fl.seek(weight_start_ofs + bind.weight_offset, io.SEEK_SET)
+                cenv.double_weights = self._parse_array(
+                    RiggingDoubleWeightParser, bind.count
+                )
+            for bind in cenv.multi_binds:
+                self._fl.seek(weight_start_ofs + bind.weight_offset, io.SEEK_SET)
+                cenv.double_weights = self._parse_array(
+                    RiggingMultiWeightParser, bind.count
+                )
+        print(f"Envelopes: {len(envelopes)} > {envelopes}")
+        return envelopes
+
     def _parse_textures(self):
         """Parse textures"""
         tex_len = self._header.textures.length
@@ -609,7 +620,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             if bitmap is not None:
                 self._textures.append((tex_name, bitmap))
 
-    def _parse_nodes(self):
+    def _parse_nodes(self) -> list[HSFNode]:
         """Parse the HSF-tree consisting of nodes"""
         node_len = self._header.nodes.length
         nodes: list[HSFNode] = []
@@ -641,6 +652,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         - `self._normals`
         - `self._uvs`
         - `self._colors`
+        - `self._envelopes`
         """
         if node.type == HSFNodeType.MESH:
             self._setup_mesh_references(node)
@@ -674,6 +686,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         Ties all indices to the relevant data entries for the given mesh.
         E.g. primitive_index, position_index, etc.
         """
+        assert node.mesh_data is not None
         # Primitives
         primitives_index = node.mesh_data.primitives_index
         assert (
@@ -726,6 +739,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         node.mesh_data.uvs = uv_indices_data
         node.mesh_data.colors = color_indices_data
         node.mesh_data.attribute = attribute
+
+        for i in range(node.mesh_data.cenv_count):
+            node.mesh_data.envelopes.append(
+                self._envelopes[node.mesh_data.cenv_index + i]
+            )
+        print(f"Envelopes for '{node.mesh_data.name}': {node.mesh_data.envelopes}")
 
     def _verify_node_references(self, node: HSFNode):
         """Verifies that referenced indices are set up correctly. This is just a sanity check."""

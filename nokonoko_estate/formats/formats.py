@@ -390,20 +390,12 @@ class HSFMeshNodeData(HSFData):
     # Helpers
     attribute: Optional["AttributeObject"] = None
     name: str = ""
-    single_bind: int = -1
     positions: list[tuple[int, int, int]] = field(default_factory=list)
     normals: list[tuple[int, int, int]] = field(default_factory=list)
     uvs: list[tuple[int, int]] = field(default_factory=list)
     colors: list[tuple[int, int, int, int]] = field(default_factory=list)
-
-    # Triangles, quads, etc.
     primitives: list[PrimitiveObject] = field(default_factory=list)
-
-    single_binds: list[RiggingSingleBind] = field(default_factory=list)
-    rigging_double_binds: list[RiggingDoubleBind] = field(default_factory=list)
-    multi_binds: list[RiggingMultiBind] = field(default_factory=list)
-    double_weights: list[RiggingDoubleWeight] = field(default_factory=list)
-    multi_weights: list[RiggingMultiWeight] = field(default_factory=list)
+    envelopes: list["HSFEnvelope"] = field(default_factory=list)
 
     def __str__(self):
         return f'MeshNodeData["{self.name}", primitives={len(self.primitives)}, positions={len(self.positions)}, normals={len(self.normals)}, uvs={len(self.uvs)}, colors={len(self.colors)}]'
@@ -537,6 +529,43 @@ class AttributeObject(HSFData):
         return f"AttributeObject[{self.name}, texture={self.texture_index}]"
 
 
+@dataclass
+class SkeletonObject(HSFData):
+    """TODO"""
+
+
+@dataclass
+class HSFRigHeader(HSFData):
+    """TODO"""
+
+    name: str
+    single_bind_offset: int = -1
+    double_bind_offset: int = -1
+    multi_bind_offset: int = -1
+    single_bind_count: int = 0
+    double_bind_count: int = 0
+    multi_bind_count: int = 0
+    vertex_count: int = 0
+    single_bind: int = -1
+
+
+@dataclass
+class HSFEnvelope(HSFData):
+    """TODO
+    See: MPLibrary
+    """
+
+    single_binds: list[RiggingSingleBind] = field(default_factory=list)
+    double_binds: list[RiggingDoubleBind] = field(default_factory=list)
+    double_weights: list[RiggingDoubleWeight] = field(default_factory=list)
+    multi_binds: list[RiggingMultiBind] = field(default_factory=list)
+    multi_weights: list[RiggingMultiWeight] = field(default_factory=list)
+
+    vertex_count: int = 0
+    name: int = 0xCCCCCCCC  # usually this value if null and unused
+    copy_count: int = 0  # matches vertex count when no binds are used, else 0
+
+
 ##############
 # TEXTURE
 ##############
@@ -627,8 +656,13 @@ class MotionTrackEffect(Enum):
 
     CAMERA_ASPECT = 14
     CAMERA_FOV = 15
+    CAMERA_NEAR = 17
+    CAMERA_FAR = 18
 
     VISIBLE = 24
+    UNK_25 = 25
+    UNK_26 = 26
+    UNK_27 = 27
 
     ROTATION_X = 28
     ROTATION_Y = 29

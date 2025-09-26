@@ -13,6 +13,7 @@ from nokonoko_estate.formats.formats import (
     HSFNode,
     HSFNodeType,
     HSFReplicaNodeData,
+    HSFRigHeader,
     LightingChannelFlags,
     MaterialObject,
     AttributeObject,
@@ -20,6 +21,11 @@ from nokonoko_estate.formats.formats import (
     NodeTransform,
     HSFPaletteHeader,
     HSFTextureHeader,
+    RiggingDoubleBind,
+    RiggingDoubleWeight,
+    RiggingMultiBind,
+    RiggingMultiWeight,
+    RiggingSingleBind,
     Vertex,
 )
 from nokonoko_estate.parsers.base import HSFParserBase
@@ -246,7 +252,6 @@ class HSFNodeParser(HSFParserBase[HSFNode]):
                 r_parser = HSFCameraNodeDataParser(self._fl, self._header)
                 node.camera_data = r_parser.parse()
                 self._fl.seek(start + 0x144, io.SEEK_SET)
-                raise ValueError(f"Cannot parse CAMERA-node: {node}")
             case _:
                 raise ValueError(f"Cannot parse {node.type}-node: {node}")
         return node
@@ -353,8 +358,56 @@ class MaterialObjectParser(HSFParserBase[MaterialObject]):
         return mat
 
 
+class RigHeaderParser(HSFParserBase[HSFRigHeader]):
+    """Parses rigs/cenv"""
+
+    _data_type = HSFRigHeader
+    struct_formatting = ">IIIIIIIII"
+
+    # def parse(self):
+    #     header = super().parse()
+    #     print(header)
+    #     print(f"{header.name:#x}, {header.name}")
+    #     return header
+
+
+class RiggingSingleBindParser(HSFParserBase[RiggingSingleBind]):
+    """Parses RiggingSingleBind"""
+
+    _data_type = RiggingSingleBind
+    struct_formatting = ">ihhhh"
+
+
+class RiggingDoubleBindParser(HSFParserBase[RiggingDoubleBind]):
+    """Parses RiggingDoubleBind"""
+
+    _data_type = RiggingDoubleBind
+    struct_formatting = ">iiii"
+
+
+class RiggingMultiBindParser(HSFParserBase[RiggingMultiBind]):
+    """Parses RiggingMultiBind"""
+
+    _data_type = RiggingMultiBind
+    struct_formatting = ">ihhhhi"
+
+
+class RiggingDoubleWeightParser(HSFParserBase[RiggingDoubleWeight]):
+    """Parses RiggingDoubleWeight"""
+
+    _data_type = RiggingDoubleWeight
+    struct_formatting = ">fhhhh"
+
+
+class RiggingMultiWeightParser(HSFParserBase[RiggingMultiWeight]):
+    """Parses RiggingMultiWeight"""
+
+    _data_type = RiggingMultiWeight
+    struct_formatting = ">if"
+
+
 class TextureHeaderParser(HSFParserBase[HSFTextureHeader]):
-    """Pares texture headers"""
+    """Parses texture headers"""
 
     _data_type = HSFTextureHeader
     struct_formatting = ">IIBBHHHIiII"

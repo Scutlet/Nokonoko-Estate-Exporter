@@ -1,16 +1,28 @@
+import argparse
 import os
 
 from nokonoko_estate.parsers.file_parser import HSFFileParser
 from nokonoko_estate.serializers.dae.file_serializer import HSFFileDAESerializer
 
 # FILENAME = "resources/w05_file24.hsf"  # KTT board
-FILENAME = "resources/w05_file0.hsf"  # KTT map
+# FILENAME = "resources/w05_file0.hsf"  # KTT map
 # FILENAME = "resources/w03/file17.hsf"  # Boo start
 # FILENAME = "resources/w03/file23.hsf"
 # FILENAME = "resources/w03/file30.hsf"
 OUTPUT_FOLDER = "output"
 
 if __name__ == "__main__":
+    argparser = argparse.ArgumentParser(
+        "Nokonoko-Estate-Exporter",
+        description="Convert Mario Party 8 .hsf files to .dae",
+        epilog="See https://github.com/Scutlet/Nokonoko-Estate-Exporter",
+    )
+    argparser.add_argument("filepath", help="Input .hsf file")
+    argparser.add_argument("-o", "--output", help="Output folder")
+    args = argparser.parse_args()
+    FILENAME = args.filepath
+    OUTPUT_FOLDER = args.output or OUTPUT_FOLDER
+
     print(f"Parsing {FILENAME} ...")
     parser = HSFFileParser(FILENAME)
     data = parser.parse_from_file()
