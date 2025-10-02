@@ -42,6 +42,9 @@ class HSFFileDAESerializer:
         root.set("version", "1.4.1")
         asset = ET.SubElement(root, "asset")
         contributor = ET.SubElement(asset, "contributor")
+        ET.SubElement(contributor, "author_website").text = (
+            "https://github.com/Scutlet/Nokonoko-Estate-Exporter"
+        )
         author = ET.SubElement(contributor, "authoring_tool")
         author.text = "Nokonoko Estate Exporter"
         created = ET.SubElement(asset, "created")
@@ -264,8 +267,8 @@ class HSFFileDAESerializer:
         skin = ET.SubElement(controller, "skin", source=f"#{uid}-mesh")
 
         # Offset into world space when in the rest pose
-        ET.SubElement(skin, "bind_shape_matrix").text = " ".join(
-            map(lambda v: f"{v:f}", node.hierarchy_data.world_transform().as_raw())
+        ET.SubElement(skin, "bind_shape_matrix").text = (
+            self._serialize_transformation_matrix(node.hierarchy_data.world_transform())
         )
 
         # ============================================================
@@ -865,11 +868,11 @@ class HSFFileDAESerializer:
         if name is None:
             name = uid
         xml_node = ET.Element("node", id=name, name=name, type="NODE")
-        matrix = ET.SubElement(xml_node, "matrix", sid="transform")
+        # matrix = ET.SubElement(xml_node, "matrix", sid="transform")
         # A list of 16 floating-point values. These values are organized into a 4-by-4
         #   column-order matrix suitable for matrix composition.
-        trans_mtx = transform or node.hierarchy_data.world_transform()
-        matrix.text = self._serialize_transformation_matrix(trans_mtx)
+        # trans_mtx = transform or node.hierarchy_data.world_transform()
+        # matrix.text = self._serialize_transformation_matrix(trans_mtx)
         geo = ET.SubElement(
             xml_node, "instance_controller", url=f"#Armature_{uid}-skin"  # , name=name
         )
