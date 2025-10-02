@@ -125,6 +125,9 @@ class RiggingDoubleBind(HSFData):
     weight_count: int
     weight_offset: int
 
+    # Helpers
+    weights: list["RiggingDoubleWeight"] = field(default_factory=list)
+
 
 @dataclass
 class RiggingMultiBind(HSFData):
@@ -138,6 +141,9 @@ class RiggingMultiBind(HSFData):
     normal_index: int  # short
     normal_count: int  # short
     weight_offset: int
+
+    # Helpers
+    weights: list["RiggingMultiWeight"] = field(default_factory=list)
 
 
 @dataclass
@@ -604,9 +610,7 @@ class HSFEnvelope(HSFData):
 
     single_binds: list[RiggingSingleBind] = field(default_factory=list)
     double_binds: list[RiggingDoubleBind] = field(default_factory=list)
-    double_weights: list[RiggingDoubleWeight] = field(default_factory=list)
     multi_binds: list[RiggingMultiBind] = field(default_factory=list)
-    multi_weights: list[RiggingMultiWeight] = field(default_factory=list)
 
     vertex_count: int = 0
     name: int = 0xCCCCCCCC  # usually this value if null and unused

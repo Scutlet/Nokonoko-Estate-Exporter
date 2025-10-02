@@ -54,3 +54,4 @@ if __name__ == "__main__":
         f"{os.path.join(OUTPUT_FOLDER, basename, basename)}.dae",
     )
     serializer.serialize()
+    print(f"Export complete!")

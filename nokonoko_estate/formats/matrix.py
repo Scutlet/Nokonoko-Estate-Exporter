@@ -180,18 +180,6 @@ class RotationMatrix(GenericMatrix[Literal[3], Literal[3]]):
             scale[0] != 0 and scale[1] != 0 and scale[2] != 0
         ), f"Scale component cannot be zero {scale}"
         matrix_rot = cls.from_euler_rotation(rot).transpose()
-
-        # identity = cls.from_euler_rotation(rot).transpose() * cls.from_euler_rotation(
-        #     rot
-        # )
-        # for i, v in enumerate(identity._matrix):
-        #     exp = 1 if i % (identity.columns + 1) == 0 else 0
-        #     if v != exp:
-        #         print(identity)
-        #         print(cls.from_euler_rotation(rot))
-        #         print(cls.from_euler_rotation(rot).transpose())
-        #         break
-
         matrix_scale = cls.from_euler_scale((1 / scale[0], 1 / scale[1], 1 / scale[2]))
         return matrix_scale * matrix_rot
 

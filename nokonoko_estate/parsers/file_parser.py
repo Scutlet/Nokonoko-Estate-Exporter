@@ -538,12 +538,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             for bind in cenv.double_binds:
                 # print("\t", bind.count, f"{bind.weight_offset:#x}")
                 self._fl.seek(weight_start_ofs + bind.weight_offset, io.SEEK_SET)
-                cenv.double_weights = self._parse_array(
+                bind.weights = self._parse_array(
                     RiggingDoubleWeightParser, bind.weight_count
                 )
             for bind in cenv.multi_binds:
                 self._fl.seek(weight_start_ofs + bind.weight_offset, io.SEEK_SET)
-                cenv.double_weights = self._parse_array(
+                bind.weights = self._parse_array(
                     RiggingMultiWeightParser, bind.weight_count
                 )
         print(f"Envelopes: {len(envelopes)} > {envelopes}")

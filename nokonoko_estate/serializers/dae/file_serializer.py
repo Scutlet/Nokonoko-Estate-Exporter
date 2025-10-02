@@ -285,7 +285,13 @@ class HSFFileDAESerializer:
 
             # Double binds (weight w specified for the referenced bone; weight 1 - w for the other referenced bone)
             for bind in env.double_binds:
-                pass
+                for weight in bind.weights:
+                    if (
+                        i >= weight.position_index
+                        and i < weight.position_index + weight.position_count
+                    ):
+                        vertex_weights[i].append((bind.node_index_1, weight.weight))
+                        vertex_weights[i].append((bind.node_index_2, 1 - weight.weight))
 
         # Multi binds
         for bind in env.multi_binds:
@@ -299,17 +305,18 @@ class HSFFileDAESerializer:
         #   res_bones[bones_dict[<bone_index>]] = <bone_uid>
         #   res_weights[weights_dict[<weight>]] = <weight-6-decimal-places>
         bones_dict: dict[int, int] = {}
-        weights_dict: dict[int, int] = {}
+        weights_dict: dict[str, int] = {}
 
         # Write results dict
         for i, weights in enumerate(vertex_weights):
             for node_index, weight in weights:
+                weight = f"{weight:f}"
                 if node_index not in bones_dict:
                     n = self._data.nodes[node_index]
                     res_bones.append(n)
                     bones_dict[node_index] = len(res_bones) - 1
                 if weight not in weights_dict:
-                    res_weights.append(f"{weight:f}")
+                    res_weights.append(weight)
                     weights_dict[weight] = len(res_weights) - 1
 
         # Joints (bones)
@@ -408,7 +415,7 @@ class HSFFileDAESerializer:
             vcount.append(str(len(pos_weights)))
             for bone_idx, w in pos_weights:
                 v.append(str(bones_dict[bone_idx]))
-                v.append(str(weights_dict[w]))
+                v.append(str(weights_dict[f"{w:f}"]))
 
         xml_v_weights = ET.Element("vertex_weights", count=str(len(vcount)))
         skin.append(xml_v_weights)
