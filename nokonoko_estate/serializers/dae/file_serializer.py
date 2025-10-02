@@ -274,6 +274,7 @@ class HSFFileDAESerializer:
         ]
 
         # Parse weights for each vertex
+        # TODO: normal_index/normal_count?
         for i, _ in enumerate(node.mesh_data.positions):
             # Parse single binds (weight = 1 for the referenced bone)
             for bind in env.single_binds:
@@ -293,11 +294,14 @@ class HSFFileDAESerializer:
                         vertex_weights[i].append((bind.node_index_1, weight.weight))
                         vertex_weights[i].append((bind.node_index_2, 1 - weight.weight))
 
-        # Multi binds
-        for bind in env.multi_binds:
-            print(
-                f"WARN: Multi-binds not supported for node {node.name} ({node.index}); skipped!"
-            )
+            # Multi binds (multiple weights specified for each position. E.g. w1, w2, w3 (each sum to 1))
+            for bind in env.multi_binds:
+                if (
+                    i >= bind.position_index
+                    and i < bind.position_index + bind.position_count
+                ):
+                    for weight in bind.weights:
+                        vertex_weights[i].append((weight.node_index, weight.weight))
 
         res_bones: list[HSFNode] = []
         res_weights: list[str] = []
@@ -603,6 +607,7 @@ class HSFFileDAESerializer:
                 offset=str(offset),
             )
         ]
+        # TODO: Are there ever elements without normals?
         if include_normals:
             offset += 1
             inputs.append(
@@ -613,6 +618,8 @@ class HSFFileDAESerializer:
                     offset=str(offset),
                 )
             )
+        else:
+            print(f"WARN: Mesh {mesh_obj_uid} does NOT have normals defined!")
         if include_uvs:
             offset += 1
             inputs.append(

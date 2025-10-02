@@ -534,9 +534,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         # Parse weights corresponding to the binds
         weight_start_ofs = self._fl.tell()
         for cenv in envelopes:
-            # print(cenv.double_binds)
             for bind in cenv.double_binds:
-                # print("\t", bind.count, f"{bind.weight_offset:#x}")
                 self._fl.seek(weight_start_ofs + bind.weight_offset, io.SEEK_SET)
                 bind.weights = self._parse_array(
                     RiggingDoubleWeightParser, bind.weight_count
