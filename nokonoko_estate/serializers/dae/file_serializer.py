@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime
 import logging
+import pprint
 from typing import Literal
 import xml.etree.ElementTree as ET
 
@@ -253,6 +254,7 @@ class HSFFileDAESerializer:
         Serializes a single <controller> node. Used for assigning weights to vertices
         """
         assert node.mesh_data is not None
+        assert node.hierarchy_data is not None
 
         uid = f"{node.mesh_data.name}__{node.index}"
         armature_uid = f"Armature_{uid}-skin"
@@ -260,18 +262,36 @@ class HSFFileDAESerializer:
             "controller", id=armature_uid, name=f"Armature {node.name}"
         )
         skin = ET.SubElement(controller, "skin", source=f"#{uid}-mesh")
-        ET.SubElement(skin, "bind_shape_matrix").text = (
-            "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"  # identity matrix
+
+        # Offset into world space when in the rest pose
+        ET.SubElement(skin, "bind_shape_matrix").text = " ".join(
+            map(lambda v: f"{v:f}", node.hierarchy_data.world_transform().as_raw())
         )
 
         # ============================================================
         # Determine which bones need to be referenced
-        assert len(node.mesh_data.envelopes) <= 1, "Multiple envelopes not supported"
+        if not node.mesh_data.envelopes:
+            return controller
+        elif len(node.mesh_data.envelopes) > 1:
+            print(
+                f"WARN: for mesh {node.name}, multiple envelopes were encountered. Only the first will be used! Envelopes: \n{pprint.pformat(node.mesh_data.envelopes)}"
+            )
+
         env = node.mesh_data.envelopes[0]
         # Weights listed per vertex, such that weights[positionIdx] = [(boneIdx, weight), ...]
         vertex_weights: list[list[tuple[int, int]]] = [
             [] for _ in node.mesh_data.positions
         ]
+
+        if env.copy_count > 0:
+            if env.single_binds or env.double_binds or env.multi_binds:
+                print(
+                    f"WARN: for mesh {node.name} ({node.index}), encountered an envelope with copy_count > 0 and binds: \n{pprint.pformat(env)}"
+                )
+            if node.hierarchy_data.parent is None:
+                print(
+                    f"WARN: for mesh {node.name} ({node.index}), has copy_count > 0, but does not have a parent: \n{pprint.pformat(env)}"
+                )
 
         # Parse weights for each vertex
         # TODO: normal_index/normal_count?
@@ -302,6 +322,11 @@ class HSFFileDAESerializer:
                 ):
                     for weight in bind.weights:
                         vertex_weights[i].append((weight.node_index, weight.weight))
+
+            # Assume that, if copy_count is set, the mesh is fully rigged to its parent node
+            if node.hierarchy_data.parent:
+                if i < env.copy_count:
+                    vertex_weights[i].append((node.hierarchy_data.parent_index, 1))
 
         res_bones: list[HSFNode] = []
         res_weights: list[str] = []
@@ -343,21 +368,10 @@ class HSFFileDAESerializer:
         ET.SubElement(accessor, "param", name="JOINT", type="name")
 
         # Binds
-        # TODO: Proper invert matrix; this is a placeholder
-        # count = 16 (4x4 mtx) * len(null_nodes)
-
-        # print(node.name, f"{uid}-skin-bind_poses")
-        # print(inverse)
-        # for bone in res_bones:
-        #     print(bone.name)
-        #     print(bone.hierarchy_data.world_transform())
-        #     print((inverse * bone.hierarchy_data.world_transform()).as_raw())
-        #     print("--")
-        # print("----")
-        # exit(-1)
-
-        # identity = inverse * node.hierarchy_data.world_transform()
-        # print(identity)
+        if "itemhook" in node.name:
+            print(node)
+            bone = res_bones[0]
+            print((node.hierarchy_data.inverse_bind_matrix(bone)).round())
 
         source = self.serialize_vertex_data_array(
             [
