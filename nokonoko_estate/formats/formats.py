@@ -2,11 +2,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from io import BufferedReader
 import struct
-from typing import ClassVar, Generic, Optional, Self, TypeVar
+from typing import ClassVar, Generic, Optional, Self, TypeVar, cast
 
 from PIL import Image
 
 from nokonoko_estate.formats.enums import CombinerBlend, WrapMode
+from nokonoko_estate.formats.matrix import RotationMatrix, TransformationMatrix
 
 # See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
 
@@ -106,7 +107,7 @@ class RiggingSingleBind(HSFData):
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
-    bone_index: int
+    node_index: int
     position_index: int  # short
     position_count: int  # short
     normal_index: int  # short
@@ -119,9 +120,9 @@ class RiggingDoubleBind(HSFData):
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
-    bone_1: int
-    bone_2: int
-    count: int
+    node_index_1: int
+    node_index_2: int
+    weight_count: int
     weight_offset: int
 
 
@@ -131,7 +132,7 @@ class RiggingMultiBind(HSFData):
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
-    count: int
+    weight_count: int
     position_index: int  # short
     position_count: int  # short
     normal_index: int  # short
@@ -158,7 +159,7 @@ class RiggingMultiWeight(HSFData):
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
-    bone_index: int
+    node_index: int
     weight: float
 
 
@@ -208,9 +209,9 @@ class PrimitiveObject(HSFData):
 class HSFNodeType(Enum):
     """Type of node. MESH, REPLICA, and NULL1 are the most common."""
 
-    NULL1 = 0  # Used to group other related nodes together. Can be referenced by REPLICA-nodes to copy all of its children in a different XYZ-location.
+    NULL1 = 0  # Used to group other related nodes together. Represents a bone that can be animated.
     REPLICA = 1  # Copies all children in the HSF tree of the referenced (NULL1) node.
-    MESH = 2
+    MESH = 2  # Vertices and faces
     ROOT = 3
     JOINT = 4
     EFFECT = 5
@@ -330,6 +331,49 @@ class HSFHierarchyNodeData(HSFData):
     parent: Optional["HSFNode"] = None
     children: list["HSFNode"] = field(default_factory=list)
 
+    def local_transform(self) -> TransformationMatrix:
+        """Calculates the local transform of the HSFNode, not accounting for parent transforms"""
+        rot_mat = RotationMatrix.from_euler(
+            self.base_transform.rotation, self.base_transform.scale
+        )
+        return TransformationMatrix.from_rotation_matrix(
+            rot_mat, self.base_transform.position
+        )
+
+    def world_transform(self, root_override: HSFNode = None) -> TransformationMatrix:
+        """Calculates the transform of the HSFNode, accounting for parent transforms as well"""
+        rot_mat = RotationMatrix.from_euler(
+            self.base_transform.rotation, self.base_transform.scale
+        )
+        trans_mat = TransformationMatrix.from_rotation_matrix(
+            rot_mat, self.base_transform.position
+        )
+        if self.parent is None or id(self.parent) == id(root_override):
+            return trans_mat
+        parent_trans_mat = self.parent.hierarchy_data.world_transform(
+            root_override=root_override
+        )
+        return parent_trans_mat * trans_mat
+
+    def inverse_world_transform(self) -> TransformationMatrix:
+        """Calculates the inverse transform of the HSFNode. Can be used to calculate inverse bind matrices"""
+        rot_mat = RotationMatrix.from_euler_inverted(
+            self.base_transform.rotation, self.base_transform.scale
+        )
+        local_transform = TransformationMatrix.from_rotation_matrix_inverse(
+            rot_mat, self.base_transform.position
+        )
+        if self.parent is None:
+            return local_transform
+        return local_transform * self.parent.hierarchy_data.inverse_world_transform()
+
+    def inverse_bind_matrix(self, bone: HSFNode) -> TransformationMatrix:
+        """Gets the inverse bind matrix"""
+        bind_matrix = (
+            self.inverse_world_transform() * bone.hierarchy_data.world_transform()
+        )
+        return TransformationMatrix(bind_matrix.as_raw()).inverse()
+
 
 @dataclass
 class HSFReplicaNodeData(HSFData):
@@ -397,8 +441,8 @@ class HSFMeshNodeData(HSFData):
     primitives: list[PrimitiveObject] = field(default_factory=list)
     envelopes: list["HSFEnvelope"] = field(default_factory=list)
 
-    def __str__(self):
-        return f'MeshNodeData["{self.name}", primitives={len(self.primitives)}, positions={len(self.positions)}, normals={len(self.normals)}, uvs={len(self.uvs)}, colors={len(self.colors)}]'
+    # def __str__(self):
+    #     return f'MeshNodeData["{self.name}", primitives={len(self.primitives)}, positions={len(self.positions)}, normals={len(self.normals)}, uvs={len(self.uvs)}, colors={len(self.colors)}]'
 
 
 class HSFLightType(Enum):
@@ -532,6 +576,9 @@ class AttributeObject(HSFData):
 @dataclass
 class SkeletonObject(HSFData):
     """TODO"""
+
+    name: str = ""
+    transform: NodeTransform = field(default_factory=NodeTransform)
 
 
 @dataclass

@@ -54,21 +54,21 @@ class HSFFileDAESerializer:
             library_images.append(self.serialize_image(name, texture, i))
 
         # Materials & Effects
+        # TODO: Fix materialObjects vs AttributeObject
         library_materials = ET.SubElement(root, "library_materials")
         library_effects = ET.SubElement(root, "library_effects")
         for i, mat in enumerate(self._data.attributes):
             library_materials.append(self.serialize_material(mat, i))
             library_effects.append(self.serialize_effects(mat, i))
 
-        # Geometry
+        # Geometry & controller
         geometries = ET.SubElement(root, "library_geometries")
+        controllers = ET.SubElement(root, "library_controllers")
         for i, node in enumerate(
             filter(lambda node: node.type == HSFNodeType.MESH, self._data.nodes)
         ):
             geometries.append(self.serialize_geometry(node))
-
-        # Controller
-        asset = ET.SubElement(root, "library_controllers")
+            controllers.append(self.serialize_controller(node))
 
         # Visual scenes
         visual_scenes = ET.SubElement(root, "library_visual_scenes")
@@ -76,17 +76,46 @@ class HSFFileDAESerializer:
             visual_scenes, "visual_scene", id="Scene", name="Scene"
         )
 
-        for i, node in enumerate(self._data.nodes):
-            # Add all meshes to the scene
+        armature_root = ET.SubElement(
+            visual_scene, "node", id="Armature", name="Armature", type="NODE"
+        )
+        collada_nodes: dict[int, ET.Element] = [None] * len(self._data.nodes)
+        for node, _ in self._data.root_node.dfs():
             match node.type:
                 case HSFNodeType.MESH:
-                    visual_scene.append(self.serialize_visual_scene_mesh(node))
+                    collada_nodes[node.index] = self.serialize_visual_scene_mesh(node)
+                    armature_root.append(collada_nodes[node.index])
+                    # if node.hierarchy_data.parent:
+                    #     collada_nodes[node.hierarchy_data.parent.index].append(
+                    #         collada_nodes[node.index]
+                    #     )
                 case HSFNodeType.REPLICA:
-                    for e in self.serialize_visual_scene_replica(node):
-                        visual_scene.append(e)
+                    # TODO
+                    pass
+                    # for e in self.serialize_visual_scene_replica(node):
+                    #     visual_scene.append(e)
+                case HSFNodeType.NULL1:
+                    collada_nodes[node.index] = self.serialize_visual_scene_joint(node)
+                    if node.hierarchy_data.parent:
+                        collada_nodes[node.hierarchy_data.parent.index].append(
+                            collada_nodes[node.index]
+                        )
                 case _:
                     # For all other nodes, do nothing
                     continue
+        armature_root.append(collada_nodes[self._data.root_node.index])
+
+        # for i, node in enumerate(self._data.nodes):
+        #     # Add all meshes to the scene
+        #     match node.type:
+        #         case HSFNodeType.MESH:
+        #             visual_scene.append(self.serialize_visual_scene_mesh(node))
+        #         case HSFNodeType.REPLICA:
+        #             for e in self.serialize_visual_scene_replica(node):
+        #                 visual_scene.append(e)
+        #         case _:
+        #             # For all other nodes, do nothing
+        #             continue
 
         # Scene
         scene = ET.SubElement(root, "scene")
@@ -218,6 +247,190 @@ class HSFFileDAESerializer:
         for elem in self._serialize_primitive_dict("triangles", triangle_dict, uid):
             mesh.append(elem)
         return geometry
+
+    def serialize_controller(self, node: HSFNode) -> ET.Element:
+        """
+        Serializes a single <controller> node. Used for assigning weights to vertices
+        """
+        assert node.mesh_data is not None
+
+        uid = f"{node.mesh_data.name}__{node.index}"
+        armature_uid = f"Armature_{uid}-skin"
+        controller = ET.Element(
+            "controller", id=armature_uid, name=f"Armature {node.name}"
+        )
+        skin = ET.SubElement(controller, "skin", source=f"#{uid}-mesh")
+        ET.SubElement(skin, "bind_shape_matrix").text = (
+            "1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"  # identity matrix
+        )
+
+        # ============================================================
+        # Determine which bones need to be referenced
+        assert len(node.mesh_data.envelopes) <= 1, "Multiple envelopes not supported"
+        env = node.mesh_data.envelopes[0]
+        # Weights listed per vertex, such that weights[positionIdx] = [(boneIdx, weight), ...]
+        vertex_weights: list[list[tuple[int, int]]] = [
+            [] for _ in node.mesh_data.positions
+        ]
+
+        # Parse weights for each vertex
+        for i, _ in enumerate(node.mesh_data.positions):
+            # Parse single binds (weight = 1 for the referenced bone)
+            for bind in env.single_binds:
+                if (
+                    i >= bind.position_index
+                    and i < bind.position_index + bind.position_count
+                ):
+                    vertex_weights[i].append((bind.node_index, 1))
+
+            # Double binds (weight w specified for the referenced bone; weight 1 - w for the other referenced bone)
+            for bind in env.double_binds:
+                pass
+
+        # Multi binds
+        for bind in env.multi_binds:
+            print(
+                f"WARN: Multi-binds not supported for node {node.name} ({node.index}); skipped!"
+            )
+
+        res_bones: list[HSFNode] = []
+        res_weights: list[str] = []
+        # Indices into result arrays to flatten identical bone uids and weights
+        #   res_bones[bones_dict[<bone_index>]] = <bone_uid>
+        #   res_weights[weights_dict[<weight>]] = <weight-6-decimal-places>
+        bones_dict: dict[int, int] = {}
+        weights_dict: dict[int, int] = {}
+
+        # Write results dict
+        for i, weights in enumerate(vertex_weights):
+            for node_index, weight in weights:
+                if node_index not in bones_dict:
+                    n = self._data.nodes[node_index]
+                    res_bones.append(n)
+                    bones_dict[node_index] = len(res_bones) - 1
+                if weight not in weights_dict:
+                    res_weights.append(f"{weight:f}")
+                    weights_dict[weight] = len(res_weights) - 1
+
+        # Joints (bones)
+        source = ET.SubElement(skin, "source", id=f"{uid}-skin-joints")
+        name_arr = ET.SubElement(
+            source,
+            "Name_array",
+            id=f"{armature_uid}-joints-array",
+            count=str(len(res_bones)),
+        )
+        name_arr.text = " ".join(map(lambda n: f"{n.name}__{n.index}", res_bones))
+        technique = ET.SubElement(source, "technique_common")
+        accessor = ET.SubElement(
+            technique,
+            "accessor",
+            source=f"#{armature_uid}-joints-array",
+            count=str(len(res_bones)),
+            stride="1",
+        )
+        ET.SubElement(accessor, "param", name="JOINT", type="name")
+
+        # Binds
+        # TODO: Proper invert matrix; this is a placeholder
+        # count = 16 (4x4 mtx) * len(null_nodes)
+
+        # print(node.name, f"{uid}-skin-bind_poses")
+        # print(inverse)
+        # for bone in res_bones:
+        #     print(bone.name)
+        #     print(bone.hierarchy_data.world_transform())
+        #     print((inverse * bone.hierarchy_data.world_transform()).as_raw())
+        #     print("--")
+        # print("----")
+        # exit(-1)
+
+        # identity = inverse * node.hierarchy_data.world_transform()
+        # print(identity)
+
+        source = self.serialize_vertex_data_array(
+            [
+                (node.hierarchy_data.inverse_bind_matrix(bone).round()).as_raw()
+                for bone in res_bones
+            ],
+            f"{uid}-skin-bind_poses",
+        )
+        skin.append(source)
+        technique = ET.SubElement(source, "technique_common")
+        accessor = ET.SubElement(
+            technique,
+            "accessor",
+            source=f"#{uid}-skin-bind_poses-array",
+            count=str(len(res_bones)),
+            stride="16",
+        )
+        ET.SubElement(accessor, "param", name="TRANSFORM", type="float4x4")
+
+        # Weights
+        source = ET.SubElement(skin, "source", id=f"{uid}-skin-weights")
+        float_arr = ET.SubElement(
+            source,
+            "float_array",
+            id=f"{armature_uid}-skin-weights-array",
+            count=str(len(res_weights)),
+        )
+        float_arr.text = " ".join(res_weights)
+        technique = ET.SubElement(source, "technique_common")
+        accessor = ET.SubElement(
+            technique,
+            "accessor",
+            source=f"#{uid}-skin-weights",
+            count=str(len(res_weights)),
+            stride="1",
+        )
+        ET.SubElement(accessor, "param", name="WEIGHT", type="float")
+
+        # Joints
+        joints = ET.SubElement(skin, "joints")
+        ET.SubElement(joints, "input", semantic="JOINT", source=f"#{uid}-skin-joints")
+        ET.SubElement(
+            joints,
+            "input",
+            semantic="INV_BIND_MATRIX",
+            source=f"#{uid}-skin-bind_poses",
+        )
+
+        # Vertex weights
+        vcount: list[str] = []
+        v: list[tuple[str, str]] = []
+
+        for i, pos_weights in enumerate(vertex_weights):
+            weight_sum = sum(map(lambda x: x[1], pos_weights))
+            if weight_sum not in (0, 1):
+                print(
+                    f"WARN: Weight sum in {node.name} ({node.index}) for position {i} is {weight_sum}. Should be 1.0"
+                )
+            vcount.append(str(len(pos_weights)))
+            for bone_idx, w in pos_weights:
+                v.append(str(bones_dict[bone_idx]))
+                v.append(str(weights_dict[w]))
+
+        xml_v_weights = ET.Element("vertex_weights", count=str(len(vcount)))
+        skin.append(xml_v_weights)
+        ET.SubElement(
+            xml_v_weights,
+            "input",
+            semantic="JOINT",
+            source=f"#{uid}-skin-joints",
+            offset="0",
+        )
+        ET.SubElement(
+            xml_v_weights,
+            "input",
+            semantic="WEIGHT",
+            source=f"#{uid}-skin-weights",
+            offset="1",
+        )
+        # The amount of weights the nth vertex has (in each mesh's <vertices> element). All weights should add up to 1
+        ET.SubElement(xml_v_weights, "vcount").text = " ".join(vcount)
+        ET.SubElement(xml_v_weights, "v").text = " ".join(v)
+
+        return controller
 
     def _generate_vertices_from_primitives(
         self,
@@ -574,30 +787,9 @@ class HSFFileDAESerializer:
 
         return source
 
-    def _calc_true_transform(
-        self, node: HSFNode, root_override: HSFNode = None
-    ) -> TransformationMatrix:
-        """Calculates the transform of the HSFNode, accounting for parent transforms as well"""
-        if id(node) == id(root_override):
-            return TransformationMatrix.identity()
-
-        rot_mat = RotationMatrix.from_euler(
-            node.hierarchy_data.base_transform.rotation,
-            node.hierarchy_data.base_transform.scale,
-        )
-        trans_mat = TransformationMatrix.from_rotation_matrix(
-            rot_mat, node.hierarchy_data.base_transform.position
-        ).round()
-        if node.hierarchy_data.parent is None:
-            return trans_mat
-        parent_trans_mat = self._calc_true_transform(
-            node.hierarchy_data.parent, root_override=root_override
-        )
-        return parent_trans_mat * trans_mat
-
     def _serialize_transformation_matrix(self, mtx: TransformationMatrix) -> str:
         """Serializes the node's local transforms (rotation, scale, position in XYZ) to a transformation Matrix"""
-        return " ".join([str(i) for i in mtx.as_raw()])
+        return " ".join([f"{i:f}".rstrip("0").rstrip(".") for i in mtx.as_raw()])
 
     def serialize_visual_scene_replica(self, node: HSFNode) -> list[ET.Element]:
         """
@@ -620,9 +812,9 @@ class HSFFileDAESerializer:
                 self.serialize_visual_scene_mesh(
                     child,
                     transform=(
-                        self._calc_true_transform(node)
-                        * self._calc_true_transform(
-                            child, root_override=node.replica_data.replica
+                        node.hierarchy_data.world_transform()
+                        * child.hierarchy_data.world_transform(
+                            root_override=node.replica_data.replica
                         )
                     ),
                     name=f"{child.mesh_data.name}__{child.index}__{node.name}__{node.index}",
@@ -648,10 +840,14 @@ class HSFFileDAESerializer:
         matrix = ET.SubElement(xml_node, "matrix", sid="transform")
         # A list of 16 floating-point values. These values are organized into a 4-by-4
         #   column-order matrix suitable for matrix composition.
-        trans_mtx = transform or self._calc_true_transform(node)
+        trans_mtx = transform or node.hierarchy_data.world_transform()
         matrix.text = self._serialize_transformation_matrix(trans_mtx)
         geo = ET.SubElement(
-            xml_node, "instance_geometry", url=f"#{uid}-mesh", name=name
+            xml_node, "instance_controller", url=f"#Armature_{uid}-skin"  # , name=name
+        )
+
+        ET.SubElement(geo, "skeleton").text = (
+            f"#Armature_{self._data.root_node.name}__{self._data.root_node.index}"
         )
         bind_material = ET.SubElement(geo, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
@@ -681,4 +877,21 @@ class HSFFileDAESerializer:
         #     </technique_common>
         #   </bind_material>
 
+        return xml_node
+
+    def serialize_visual_scene_joint(self, node: HSFNode) -> ET.Element:
+        """
+        Serialize a node of type "JOINT".
+        """
+        assert node.type == HSFNodeType.NULL1
+        uid = f"{node.name}__{node.index}"
+        name = node.name
+        xml_node = ET.Element(
+            "node", id=f"Armature_{uid}", name=name, sid=uid, type="JOINT"
+        )
+        matrix = ET.SubElement(xml_node, "matrix", sid="transform")
+        # A list of 16 floating-point values. These values are organized into a 4-by-4
+        #   column-order matrix suitable for matrix composition.
+        trans_mtx = node.hierarchy_data.local_transform()
+        matrix.text = self._serialize_transformation_matrix(trans_mtx)
         return xml_node

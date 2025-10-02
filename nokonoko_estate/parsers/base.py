@@ -77,7 +77,7 @@ class HSFParserBase(Generic[T]):
             while (char := self._fl.read(0x01)) != b"\x00":
                 string += char
             return string.decode(format)
-        raise ValueError("Size not provided when parsing a string")
+        raise ValueError("Size parameter not supported")
 
     def _parse_from_stringtable(self, ofs: int, size=-1, format="utf-8"):
         """Parse a string from a stringtable"""

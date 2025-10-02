@@ -26,6 +26,7 @@ from nokonoko_estate.formats.formats import (
     RiggingMultiBind,
     RiggingMultiWeight,
     RiggingSingleBind,
+    SkeletonObject,
     Vertex,
 )
 from nokonoko_estate.parsers.base import HSFParserBase
@@ -233,6 +234,8 @@ class HSFNodeParser(HSFParserBase[HSFNode]):
             case HSFNodeType.NULL1:
                 # The remainder of the data is junk data. This data was left over from the previous node
                 #   in the node list when the HSF-file was created. Skip over all this junk.
+                # m_parser = HSFMeshNodeDataParser(self._fl, self._header)
+                # node.mesh_data = m_parser.parse()
                 self._fl.seek(start + 0x144, io.SEEK_SET)
             case HSFNodeType.MESH:
                 m_parser = HSFMeshNodeDataParser(self._fl, self._header)
@@ -356,6 +359,22 @@ class MaterialObjectParser(HSFParserBase[MaterialObject]):
         mat.attribute_index = self._parse_int()
 
         return mat
+
+
+class SkeletonParser(HSFParserBase[SkeletonObject]):
+    """Parses skeletons"""
+
+    _data_type = SkeletonObject
+
+    def parse(self):
+        data = SkeletonObject()
+        data.name = self._parse_from_stringtable(self._parse_int())
+        data.transform = NodeTransform(
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+            (self._parse_float(), self._parse_float(), self._parse_float()),
+        )
+        return data
 
 
 class RigHeaderParser(HSFParserBase[HSFRigHeader]):

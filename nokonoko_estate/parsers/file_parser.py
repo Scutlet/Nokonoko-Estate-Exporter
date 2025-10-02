@@ -26,6 +26,7 @@ from nokonoko_estate.formats.formats import (
     HSFPaletteHeader,
     PrimitiveObject,
     HSFTextureHeader,
+    SkeletonObject,
     Vertex,
 )
 from nokonoko_estate.parsers.base import HSFParserBase
@@ -44,6 +45,7 @@ from nokonoko_estate.parsers.parsers import (
     RiggingMultiBindParser,
     RiggingMultiWeightParser,
     RiggingSingleBindParser,
+    SkeletonParser,
     TextureHeaderParser,
     VertexParser,
 )
@@ -70,6 +72,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         self._uvs: list[HSFAttributes[tuple[float, float]]] = []
         self._colors: list[HSFAttributes[tuple[float, float, float, float]]] = []
         self._envelopes: list[HSFEnvelope] = []
+        self._skeletons: list[SkeletonObject] = []
 
         self._textures: list[tuple[str, Image.Image]] = []
         self._materials: list[MaterialObject] = []
@@ -136,7 +139,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             AttributeHeaderParser, self._header.primitives.length
         )
         self._primitives = self._parse_primitives(primitive_headers)
-        print(f"{len(self._primitives)} primitives identified!")
+        print(f"Identified {len(self._primitives)} primitive(s)")
 
         # Materials
         self._fl.seek(self._header.materials.offset, io.SEEK_SET)
@@ -190,7 +193,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         # Skeletons
         print(f"Identified {self._header.skeletons.length} skeleton(s)")
         self._fl.seek(self._header.skeletons.offset, io.SEEK_SET)
-        self._parse_skeletons()
+        self._skeletons = self._parse_skeletons()
+        import pprint
+
+        pprint.pprint(self._skeletons)
+        # print(self._skeletons)
 
         # Rigs/cenv
         self._fl.seek(self._header.rigs.offset, io.SEEK_SET)
@@ -485,10 +492,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                                 ), f"Cannot parse interpolation mode {track.mode.name}"
                 # print(f"\t{name} > {track.keyframe_count} vs {len(keyframes)}, {track}")
 
-    def _parse_skeletons(self):
+    def _parse_skeletons(self) -> list[SkeletonObject]:
         """Parses skeletons"""
-
-        raise NotImplementedError("skeletons not supported")
+        return self._parse_array(SkeletonParser, self._header.skeletons.length)
 
     def _parse_rigs(self):
         """Parses rigs/cenv"""
@@ -533,12 +539,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 # print("\t", bind.count, f"{bind.weight_offset:#x}")
                 self._fl.seek(weight_start_ofs + bind.weight_offset, io.SEEK_SET)
                 cenv.double_weights = self._parse_array(
-                    RiggingDoubleWeightParser, bind.count
+                    RiggingDoubleWeightParser, bind.weight_count
                 )
             for bind in cenv.multi_binds:
                 self._fl.seek(weight_start_ofs + bind.weight_offset, io.SEEK_SET)
                 cenv.double_weights = self._parse_array(
-                    RiggingMultiWeightParser, bind.count
+                    RiggingMultiWeightParser, bind.weight_count
                 )
         print(f"Envelopes: {len(envelopes)} > {envelopes}")
         return envelopes
@@ -744,7 +750,11 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             node.mesh_data.envelopes.append(
                 self._envelopes[node.mesh_data.cenv_index + i]
             )
-        print(f"Envelopes for '{node.mesh_data.name}': {node.mesh_data.envelopes}")
+        import pprint
+
+        print(f"Envelopes for '{node.mesh_data.name}' ({node.index}):")
+        pprint.pprint(node.mesh_data.envelopes)
+        print("----")
 
     def _verify_node_references(self, node: HSFNode):
         """Verifies that referenced indices are set up correctly. This is just a sanity check."""
