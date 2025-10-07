@@ -1,51 +1,16 @@
 from dataclasses import dataclass
 from io import SEEK_CUR, BytesIO
+import logging
 from typing import Callable, Self
 from nokonoko_estate.formats.enums import GCNPaletteFormat, GCNTextureFormat
 
 from PIL import Image
 
 
-def round_up_to_multiple(value: int, multiple: int):
-    """
-    Rounds `value` up to the nearest multiple of `multiple`
-
-    See: https://github.com/TheShadowEevee/libWiiSharp/blob/master/Shared.cs
-    """
-    if value % multiple != 0:
-        value += multiple - value % multiple
-    return value
-
-
-def get_texture_byte_size(format: GCNTextureFormat, width: int, height: int) -> int:
-    """
-    Gets the total byte size for the raw texture data, given a texture format and dimensions.
-
-    See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Tools/TLP.cs
-    """
-    match format:
-        case GCNTextureFormat.I4:
-            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 8) // 2
-        case GCNTextureFormat.I8 | GCNTextureFormat.IA4:
-            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 4)
-        case GCNTextureFormat.IA8 | GCNTextureFormat.RGB565 | GCNTextureFormat.RGB5A3:
-            return round_up_to_multiple(width, 4) * round_up_to_multiple(height, 4) * 2
-        case GCNTextureFormat.RGBA32:
-            return round_up_to_multiple(width, 4) * round_up_to_multiple(height, 4) * 4
-        case GCNTextureFormat.C4:
-            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 8) // 2
-        case GCNTextureFormat.C8:
-            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 4)
-        case GCNTextureFormat.C14X2:
-            return round_up_to_multiple(width, 4) * round_up_to_multiple(height, 4) * 2
-        case GCNTextureFormat.CMPR:
-            return round_up_to_multiple(width, 8) * round_up_to_multiple(height, 8) // 2
-        case _:
-            raise NotImplementedError(f"Invalid GCNTextureFormat {format}")
-
-
 class BitMapImage:
     """Helper class for converting TPL-images to regular pngs"""
+
+    logger = logging.getLogger(__qualname__)
 
     @classmethod
     def convert_from_texture(
@@ -100,6 +65,50 @@ class TPLImageHelper:
     See conversion methods in: https://wiki.tockdom.com/wiki/TPL_(File_Format)
     """
 
+    logger = logging.getLogger(__qualname__)
+
+    @classmethod
+    def round_up_to_multiple(cls, value: int, multiple: int):
+        """
+        Rounds `value` up to the nearest multiple of `multiple`
+
+        See: https://github.com/TheShadowEevee/libWiiSharp/blob/master/Shared.cs
+        """
+        if value % multiple != 0:
+            value += multiple - value % multiple
+        return value
+
+    @classmethod
+    def get_texture_byte_size(
+        cls, format: GCNTextureFormat, width: int, height: int
+    ) -> int:
+        """
+        Gets the total byte size for the raw texture data, given a texture format and dimensions.
+
+        See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Tools/TLP.cs
+        """
+        # fmt: off
+        match format:
+            case GCNTextureFormat.I4:
+                return cls.round_up_to_multiple(width, 8) * cls.round_up_to_multiple(height, 8) // 2
+            case GCNTextureFormat.I8 | GCNTextureFormat.IA4:
+                return cls.round_up_to_multiple(width, 8) * cls.round_up_to_multiple(height, 4)
+            case GCNTextureFormat.IA8 | GCNTextureFormat.RGB565 | GCNTextureFormat.RGB5A3:
+                return cls.round_up_to_multiple(width, 4) * cls.round_up_to_multiple(height, 4) * 2
+            case GCNTextureFormat.RGBA32:
+                return cls.round_up_to_multiple(width, 4) * cls.round_up_to_multiple(height, 4) * 4
+            case GCNTextureFormat.C4:
+                return cls.round_up_to_multiple(width, 8) * cls.round_up_to_multiple(height, 8) // 2
+            case GCNTextureFormat.C8:
+                return cls.round_up_to_multiple(width, 8) * cls.round_up_to_multiple(height, 4)
+            case GCNTextureFormat.C14X2:
+                return cls.round_up_to_multiple(width, 4) * cls.round_up_to_multiple(height, 4) * 2
+            case GCNTextureFormat.CMPR:
+                return cls.round_up_to_multiple(width, 8) * cls.round_up_to_multiple(height, 8) // 2
+            case _:
+                raise NotImplementedError(f"Invalid GCNTextureFormat {format}")
+        # fmt: on
+
     def _average_rgb565_colors(self, c0: int, c1: int, weight_0=1, weight_1=1) -> int:
         """Computes a new RGB565-color by averaging each RGB565-color component according to:
         `(c0 * weight_0 + c1 * weight_1) / (weight_0 + weight_1)`
@@ -108,20 +117,22 @@ class TPLImageHelper:
         r0 = c0 >> 11 & 0x1F
         r1 = c1 >> 11 & 0x1F
         cr = (weight_0 * r0 + weight_1 * r1) // (weight_0 + weight_1)
-        # print(r0, r1, cr, cr & 0xFFFF)
+        self.logger.debug(f"{r0}, {r1}, {cr}, {cr & 0xFFFF}")
 
         # Average G
         g0 = c0 >> 5 & 0x3F
         g1 = c1 >> 5 & 0x3F
         cg = (weight_0 * g0 + weight_1 * g1) // (weight_0 + weight_1)
-        # print(f"({weight_0} * {g0} + {weight_1} * {g1}) // ({weight_0 + weight_1})")
-        # print(g0, g1, cg * 0x4, cg & 0xFFFF)
+        self.logger.debug(
+            f"({weight_0} * {g0} + {weight_1} * {g1}) // ({weight_0 + weight_1})"
+        )
+        self.logger.debug(f"{g0}, {g1}, {cg * 0x4}, {cg & 0xFFFF}")
 
         # Average B
         b0 = c0 >> 0 & 0x1F
         b1 = c1 >> 0 & 0x1F
         cb = (weight_0 * b0 + weight_1 * b1) // (weight_0 + weight_1)
-        # print(b0, b1, cb, cb & 0xFFFF)
+        self.logger.debug(f"{b0}, {b1}, {cb}, {cb & 0xFFFF}")
         return cr << 11 | cg << 5 | cb << 0
 
     def _from_gcn_encoding(
@@ -239,7 +250,7 @@ class TPLImageHelper:
         r = (pixel >> 11 & 0x1F) * 255 // 0x1F
         g = (pixel >> 5 & 0x3F) * 255 // 0x3F
         b = (pixel >> 0 & 0x1F) * 255 // 0x1F
-        # print(f"RGBA: {r}-{g}-{b}-{a}")
+        self.logger.debug(f"RGBA: {r}-{g}-{b}-{a}")
         return r << 24 | g << 16 | b << 8 | a << 0
 
     def from_rgb565(self, data: bytes, width: int, height: int) -> list[int]:
@@ -324,3 +335,7 @@ class TPLImageHelper:
             b"".join([int.to_bytes(pixel, 4) for pixel in rgba]),
         )
         return img
+
+
+BitMapImage.logger.setLevel(logging.WARN)
+TPLImageHelper.logger.setLevel(logging.WARN)

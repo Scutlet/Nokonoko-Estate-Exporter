@@ -1,4 +1,5 @@
 import io
+import pprint
 
 from nokonoko_estate.formats.enums import CombinerBlend, WrapMode
 from nokonoko_estate.formats.formats import (
@@ -40,8 +41,8 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
     def parse(self) -> HSFHeader:
         magic = self._fl.read(0x08)
         if magic != b"HSFV037\x00":
-            self.logger.error("Invalid file magic")
-            exit(1)
+            self._logger.error("Invalid file magic")
+            raise ValueError("Invalid file magic encountered!")
 
         header = HSFHeader(magic)
 
@@ -105,7 +106,7 @@ class HSFHeaderParser(HSFParserBase[HSFHeader]):
         header.stringtable.offset = self._parse_int()
         header.stringtable.length = self._parse_int()
 
-        # print(header)
+        self._logger.debug("Header:\n" + pprint.pformat(header))
         return header
 
 
@@ -222,7 +223,6 @@ class HSFNodeParser(HSFParserBase[HSFNode]):
         str_ofs = self._parse_int()
         node.name = self._parse_from_stringtable(str_ofs, -1)
         node.type = HSFNodeType(self._parse_int())
-        # print(f"> {name or '<empty>'} ({node.type.name})")
         node.const_data_ofs = self._parse_int()
         node.render_flags = self._parse_int()
 
@@ -382,12 +382,6 @@ class RigHeaderParser(HSFParserBase[HSFRigHeader]):
 
     _data_type = HSFRigHeader
     struct_formatting = ">IIIIIIIII"
-
-    # def parse(self):
-    #     header = super().parse()
-    #     print(header)
-    #     print(f"{header.name:#x}, {header.name}")
-    #     return header
 
 
 class RiggingSingleBindParser(HSFParserBase[RiggingSingleBind]):

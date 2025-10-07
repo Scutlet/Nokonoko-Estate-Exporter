@@ -103,7 +103,11 @@ class Vertex(HSFData):
 
 @dataclass
 class RiggingSingleBind(HSFData):
-    """TODO
+    """
+    Binds with a `weight = 1`. Ties vertices from the specified positions to the specified
+    bone with a weight `1`. I.e., this vertex is fully (and only) affected by the specified
+    bone.
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -116,7 +120,13 @@ class RiggingSingleBind(HSFData):
 
 @dataclass
 class RiggingDoubleBind(HSFData):
-    """TODO
+    """
+    Binds to two bones with weight `w` and `1 - w`. Ties vertices from the specified positions
+    to the two specified bones with a weight `w` and `1 - w` respectively. I.e., this vertex is
+    only affected by the two specified bones.
+
+    The weight `w` and the vertex positions are defined by each `RiggingDoubleWeight`
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -131,7 +141,12 @@ class RiggingDoubleBind(HSFData):
 
 @dataclass
 class RiggingMultiBind(HSFData):
-    """TODO
+    """
+    Binds to some amount of bones with a series of weights. Ties vertices from the specified positions
+    to the specified bones with some weights. I.e., this vertex is only affected by the specified bones.
+
+    The weight `w` for a specific bone is defined by each `RiggingMultiWeight`
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -148,7 +163,9 @@ class RiggingMultiBind(HSFData):
 
 @dataclass
 class RiggingDoubleWeight(HSFData):
-    """TODO
+    """
+    Weights when rigged to exactly two bones. See `RiggingDoubleBind`
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -161,7 +178,9 @@ class RiggingDoubleWeight(HSFData):
 
 @dataclass
 class RiggingMultiWeight(HSFData):
-    """TODO
+    """
+    Weights when rigged to multiple bones (> 2). See `RiggingMultiBind`
+
     See: https://github.com/Ploaj/Metanoia/blob/master/Metanoia/Formats/GameCube/HSF.cs
     """
 
@@ -280,7 +299,7 @@ class HSFNode(HSFData):
     light_data: Optional["HSFLightNodeData"] = None  # LIGHT-node
     camera_data: Optional["HSFCameraNodeData"] = None  # CAMERA-node
 
-    # TODO: envelopes, clusters, shapes
+    # TODO: clusters, shapes
 
     @property
     def has_hierarchy(self):
@@ -322,8 +341,6 @@ class HSFHierarchyNodeData(HSFData):
     Data only for nodes with a hierarchy. I.e. NULL1, MESH, REPLICA nodes.
     """
 
-    # TODO: Camera data/light data. MPLibrary.GCN.HSFObject.Read
-    # TODO: Stuff below isn't used for Camera/lights
     parent_index: int = -1
     children_count: int = 0
     symbol_index: int = -1

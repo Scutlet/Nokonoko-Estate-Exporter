@@ -1,15 +1,11 @@
 import argparse
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 from nokonoko_estate.parsers.file_parser import HSFFileParser
 from nokonoko_estate.serializers.dae.file_serializer import HSFFileDAESerializer
-
-# FILENAME = "resources/w05_file24.hsf"  # KTT board
-# FILENAME = "resources/w05_file0.hsf"  # KTT map
-# FILENAME = "resources/w03/file17.hsf"  # Boo start
-# FILENAME = "resources/w03/file23.hsf"
-# FILENAME = "resources/w03/file30.hsf"
-OUTPUT_FOLDER = "output"
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
@@ -19,34 +15,47 @@ if __name__ == "__main__":
     )
     argparser.add_argument("filepath", help="Input .hsf file")
     argparser.add_argument("-o", "--output", help="Output folder")
+    argparser.add_argument("-v", "--verbose", action="store_true")
     args = argparser.parse_args()
     FILENAME = args.filepath
-    OUTPUT_FOLDER = args.output or OUTPUT_FOLDER
-
-    print(f"Parsing {FILENAME} ...")
-    parser = HSFFileParser(FILENAME)
-    data = parser.parse_from_file()
+    OUTPUT_FOLDER = args.output or "output"
 
     basename = os.path.splitext(os.path.basename(FILENAME))[0]
     os.makedirs(os.path.join(OUTPUT_FOLDER, basename, "images"), exist_ok=True)
 
+    level = logging.DEBUG if args.verbose else logging.INFO
+    # Logging
+    logging.basicConfig(
+        filename=os.path.join(OUTPUT_FOLDER, basename, "out.log"),
+        level=level,
+        filemode="w",
+        format="%(asctime)s %(name)s [%(levelname)s] > %(message)s",
+    )
+
+    logger.info(f"Parsing {FILENAME} ...")
+    parser = HSFFileParser(FILENAME)
+    data = parser.parse_from_file()
+
     # parse_logpath = os.path.join(OUTPUT_FOLDER, basename, "parser.log")
-    # print(f"Exporting parse log to {parse_logpath} ...")
+    # logger.info(f"Exporting parse log to {parse_logpath} ...")
     # with open(parse_logpath, "wb") as fl:
     #     fl.write(bytes([x.value for x in parser.get_parselog()]))
 
-    print(
+    logger.info(
         f"Exporting textures to {os.path.join(OUTPUT_FOLDER, basename, 'images')} ..."
     )
+    textures: list[str] = []
     for name, tex in data.textures:
         # tex.show()
         name = name.replace("/", "")
         name = name.replace("\\", "")
         output_fp = f"{os.path.join(OUTPUT_FOLDER, basename, 'images', name)}.png"
         tex.save(output_fp)
-        # print(f"\tExported texture to {output_fp}")
+        logger.debug(f"\t - Exported texture to {output_fp}")
+        textures.append(f"{name}.png")
 
-    print(
+    logger.info(f"Exported {len(textures)} texture(s) > {', '.join(textures)}")
+    logger.info(
         f"Exporting model to {os.path.join(OUTPUT_FOLDER, basename, basename)}.dae ..."
     )
     serializer = HSFFileDAESerializer(
@@ -54,4 +63,4 @@ if __name__ == "__main__":
         f"{os.path.join(OUTPUT_FOLDER, basename, basename)}.dae",
     )
     serializer.serialize()
-    print(f"Export complete!")
+    logger.info(f"Export complete!")

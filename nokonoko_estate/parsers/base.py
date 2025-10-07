@@ -8,6 +8,8 @@ from nokonoko_estate.formats.formats import HSFData, HSFHeader
 T = TypeVar("T", bound=HSFData)
 T2 = TypeVar("T", bound=HSFData)
 
+logger = logging.getLogger(__name__)
+
 
 class HSFParserBase(Generic[T]):
     """
@@ -20,13 +22,13 @@ class HSFParserBase(Generic[T]):
     """
 
     _data_type: type[T] = HSFData
+    _byteorder = "big"
 
     def __init__(self, fl: io.BufferedReader, header: HSFHeader | None = None):
         self._fl = fl
         self._header = header
-
-    _byteorder = "big"
-    logger = logging.Logger(__name__)
+        # self._logger = logging.getLogger(f"{self.__module__}.{self.__class__.__name__}")
+        self._logger = logging.getLogger(f"{self.__class__.__name__}")
 
     # See: https://docs.python.org/3/library/struct.html#format-characters
     # NB: No automatic padding is added to the structs!

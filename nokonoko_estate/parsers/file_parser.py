@@ -1,7 +1,7 @@
 from copy import deepcopy
 import io
-import logging
 import os
+import pprint
 
 from PIL import Image
 
@@ -49,9 +49,8 @@ from nokonoko_estate.parsers.parsers import (
     TextureHeaderParser,
     VertexParser,
 )
-from nokonoko_estate.parsers.textures import BitMapImage, get_texture_byte_size
+from nokonoko_estate.parsers.textures import BitMapImage, TPLImageHelper
 
-logger = logging.Logger(__name__)
 PrimitiveType = PrimitiveObject.PrimitiveType
 
 
@@ -107,13 +106,13 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         #         print("^-- FOUND REPLICA NODE --^")
         #         # exit(-1)
         # print("Didn't find replica...")
-        # print("Non-hierarchy nodes:")
+        self._logger.info(f"Non-hierarchy nodes ({len(self._non_hierarchy_nodes)}):")
         for node in self._non_hierarchy_nodes:
-            print(f"| {node} > {node.light_data} {node.camera_data}")
+            self._logger.info(f"| {node} > {node.light_data} {node.camera_data}")
 
-        print("HSF tree:")
+        self._logger.info("HSF hierarchy tree:")
         for node, level in self._root_node.dfs():
-            print(
+            self._logger.info(
                 f"|{'-' * 4 * level} {node} @ {node.hierarchy_data.base_transform.position}"
             )
 
@@ -131,7 +130,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         # Nodes (these tie everything together; we may need these later on)
         self._fl.seek(self._header.nodes.offset)
         self._nodes = self._parse_nodes()
-        print(f"Identified {len(self._nodes)} node(s)")
+        self._logger.info(f"Identified {len(self._nodes)} node(s)")
 
         # Primitives
         self._fl.seek(self._header.primitives.offset, io.SEEK_SET)
@@ -139,21 +138,21 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             AttributeHeaderParser, self._header.primitives.length
         )
         self._primitives = self._parse_primitives(primitive_headers)
-        print(f"Identified {len(self._primitives)} primitive(s)")
+        self._logger.info(f"Identified {len(self._primitives)} primitive(s)")
 
         # Materials
         self._fl.seek(self._header.materials.offset, io.SEEK_SET)
         self._materials = self._parse_array(
             MaterialObjectParser, self._header.materials.length
         )
-        print(f"Identified {len(self._materials)} Material(s)")
+        self._logger.info(f"Identified {len(self._materials)} material(s)")
 
         # Attributes
         self._fl.seek(self._header.attributes.offset, io.SEEK_SET)
         self._attributes = self._parse_array(
             AttributeParser, self._header.attributes.length
         )
-        print(f"Identified {len(self._attributes)} attributes(s)")
+        self._logger.info(f"Identified {len(self._attributes)} attributes(s)")
 
         # (Vertex) positions
         self._fl.seek(self._header.positions.offset, io.SEEK_SET)
@@ -161,7 +160,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             AttributeHeaderParser, self._header.positions.length
         )
         self._positions = self._parse_positions(position_headers)
-        print(f"Identified {len(self._positions)} position(s)")
+        self._logger.info(f"Identified {len(self._positions)} position(s)")
 
         # (Vertex) Normals
         self._fl.seek(self._header.normals.offset, io.SEEK_SET)
@@ -169,38 +168,39 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             AttributeHeaderParser, self._header.normals.length
         )
         self._normals = self._parse_normals(normal_headers, self._nodes)
-        print(f"Identified {len(self._normals)} normal(s)")
+        self._logger.info(f"Identified {len(self._normals)} normal(s)")
 
         # (Vertex) UV's
         self._fl.seek(self._header.uvs.offset, io.SEEK_SET)
         uv_headers = self._parse_array(AttributeHeaderParser, self._header.uvs.length)
         self._uvs = self._parse_uvs(uv_headers)
-        print(f"Identified {len(self._uvs)} UV(s)")
+        self._logger.info(f"Identified {len(self._uvs)} UV(s)")
 
         # (Vertex) Colors
         self._fl.seek(self._header.colors.offset, io.SEEK_SET)
         colors = self._parse_array(AttributeHeaderParser, self._header.colors.length)
         self._colors = self._parse_colors(colors)
-        print(f"Identified {len(self._colors)} colors(s)")
+        self._logger.info(f"Identified {len(self._colors)} colors(s)")
 
         # Symbols (for children)
         self._fl.seek(self._header.symbols.offset)
         self._symbols = []
         for _ in range(self._header.symbols.length):
             self._symbols.append(self._parse_int(signed=True))
-        print(f"Identified {len(self._symbols)} symbol(s)")
+        self._logger.info(f"Identified {len(self._symbols)} symbol(s)")
 
         # Skeletons
-        print(f"Identified {self._header.skeletons.length} skeleton(s)")
+        self._logger.info(f"Identified {self._header.skeletons.length} skeleton(s)")
         self._fl.seek(self._header.skeletons.offset, io.SEEK_SET)
         self._skeletons = self._parse_skeletons()
-        import pprint
-
-        pprint.pprint(self._skeletons)
-        # print(self._skeletons)
+        if self._skeletons:
+            self._logger.info(
+                pprint.pformat(self._skeletons, compact=True, width=200, indent=4)
+            )
 
         # Rigs/cenv
         self._fl.seek(self._header.rigs.offset, io.SEEK_SET)
+        self._logger.info(f"Identified {self._header.rigs.length} rig(s)/envelopes")
         self._envelopes = self._parse_rigs()
 
         # Setup node references; these make it easier to reference other data
@@ -212,10 +212,13 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         # Motions
         self._fl.seek(self._header.motions.offset, io.SEEK_SET)
+        self._logger.info(f"Identified {self._header.motions.length} motion(s)")
         self._parse_motions()
 
         # Textures
         self._fl.seek(self._header.textures.offset, io.SEEK_SET)
+        self._logger.info(f"Identified {self._header.motions.length} texture(s)")
+        self._logger.info(f"Identified {self._header.palettes.length} palette(s)")
         self._parse_textures()
         return self._output_file()
 
@@ -296,8 +299,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 has_vertex_with_uv = True
         if has_vertex_without_uv and has_vertex_with_uv:
             # Shouldn't happen
-            print(
-                f"WARN: Unknown behaviour in primitive {prim_name} ({prim.primitive_type.name}) identified! Found vertex with UV-coordinates defined and vertex without them defined. UV-indices (if unset) will be set to 0 instead. Vertices: {prim.vertices}"
+            self._logger.warning(
+                f"Unknown behaviour in primitive {prim_name} ({prim.primitive_type.name}) identified! Found vertex with UV-coordinates defined and vertex without them defined. UV-indices (if unset) will be set to 0 instead. Vertices: {prim.vertices}"
             )
             for v in vertices:
                 if v.uv_index == -1:
@@ -336,8 +339,8 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 continue
             # Sanity check
             if nrm_index >= len(headers):
-                print(
-                    f"WARN: In {node} ({node.type.name}) Attempted to index into normals[{nrm_index:#x}] while there are only {len(headers)} normals!"
+                self._logger.warning(
+                    f"In {node} ({node.type.name}) Attempted to index into normals[{nrm_index:#x}] while there are only {len(headers)} normals!"
                 )
                 continue
             # TODO: If multiple nodes use the same normals, they are parsed multiple times
@@ -364,7 +367,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     )
 
             # TODO: Verify whether there are multiple nodes with the same nrm_idx, but with a different value for cenvCount!
-        # print(result)
         return result
 
     def _parse_uvs(
@@ -412,17 +414,16 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         return result
 
     def _parse_motions(self):
-        """Parse animation data"""
+        """Parse animation data. We do not output anything for this (TODO)"""
         motions: list[HSFMotionDataHeader] = self._parse_array(
             MotionDataHeaderParser, self._header.motions.length
         )
         start_ofs = self._fl.tell()
-        print(f"Identified {len(motions)} motion(s)")
 
         for motion in motions:
             name = self._parse_from_stringtable(motion.string_offset, -1)
-            print(
-                f"> Parsing motion: {name} ({motion.track_count} tracks, {motion.motion_length} frames)"
+            self._logger.debug(
+                f"- Parsing motion: {name} ({motion.track_count} tracks, {motion.motion_length} frames)"
             )
 
             self._fl.seek(start_ofs + motion.track_data_offset)
@@ -446,7 +447,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                     track.constant = self._parse_float()
 
                 motion.tracks.append(track)
-                # print(f"\t{track}")
 
         # Parse keyframes
         keyframe_start_ofs = self._fl.tell()
@@ -458,6 +458,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 elif track.value_index > 0:
                     name = f"{self._parse_from_stringtable(track.string_offset)}_{track.value_index}"
 
+                # TODO We're not actually doing anything with these keyframes
                 keyframes = []
                 if (
                     track.keyframe_count > 0
@@ -490,7 +491,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                                 assert (
                                     False
                                 ), f"Cannot parse interpolation mode {track.mode.name}"
-                # print(f"\t{name} > {track.keyframe_count} vs {len(keyframes)}, {track}")
+                self._logger.debug(f"\t{name} - {track}")
 
     def _parse_skeletons(self) -> list[SkeletonObject]:
         """Parses skeletons"""
@@ -499,7 +500,6 @@ class HSFFileParser(HSFParserBase[HSFFile]):
     def _parse_rigs(self):
         """Parses rigs/cenv"""
         rig_len = self._header.rigs.length
-        print(f"Identified {rig_len} rig(s)")
         rig_headers: list[HSFRigHeader] = self._parse_array(RigHeaderParser, rig_len)
         start_ofs = self._fl.tell()
 
@@ -544,7 +544,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 bind.weights = self._parse_array(
                     RiggingMultiWeightParser, bind.weight_count
                 )
-        print(f"Envelopes: {len(envelopes)} > {envelopes}")
+        self._logger.debug(
+            f"Envelopes: {len(envelopes)} > {pprint.pformat(envelopes, compact=True, width=200)}"
+        )
         return envelopes
 
     def _parse_textures(self):
@@ -557,22 +559,12 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             TextureHeaderParser, tex_len
         )
         ofs_post_tex = self._fl.tell()
-        print(f"Identified {tex_len} texture(s)")
 
         self._fl.seek(pal_ofs, io.SEEK_SET)
         pal_infos: list[HSFPaletteHeader] = self._parse_array(
             PaletteHeaderParser, pal_len
         )
         ofs_post_pal = self._fl.tell()
-        print(f"Identified {pal_len} palette(s)")
-        # print(
-        #     "\n".join(
-        #         [
-        #             str(x) + self._parse_from_stringtable(x.name_offset)
-        #             for x in pal_infos
-        #         ]
-        #     )
-        # )
 
         for tex_info in tex_infos:
             tex_name = self._parse_from_stringtable(tex_info.name_offset, -1)
@@ -586,13 +578,14 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 case 0x09 | 0x0A | 0x0B:
                     format = GCNTextureFormat.C8
                 case _:
-                    raise NotImplementedError(
-                        f"Invalid tex_format found for {tex_name}: {tex_info.tex_format}"
+                    self._logger.error(
+                        f"Invalid tex_format found for {tex_name}: {tex_info.tex_format}. Skipping it..."
                     )
+                    continue
             if format == GCNTextureFormat.C8 and tex_info.bpp == 4:
                 format = GCNTextureFormat.C4
 
-            # print(f"> Identified texture {tex_name} ({format.name})")
+            self._logger.debug(f"- Identified texture {tex_name} ({format.name})")
             pal_data: bytes = bytes()
             pal_format: GCNPaletteFormat | None = None
             match tex_info.tex_format:
@@ -613,7 +606,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
                 pal_data = self._fl.read(2 * pal_info.count)
                 self._fl.seek(prev_ofs, io.SEEK_SET)
 
-            data_sz = get_texture_byte_size(format, tex_info.width, tex_info.height)
+            data_sz = TPLImageHelper.get_texture_byte_size(
+                format, tex_info.width, tex_info.height
+            )
             self._fl.seek(ofs_post_tex + tex_info.data_offset, io.SEEK_SET)
             data = self._fl.read(data_sz)
 
@@ -629,19 +624,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         node_len = self._header.nodes.length
         nodes: list[HSFNode] = []
         for i in range(node_len):
-            # x = self._fl.tell()
             node = HSFNodeParser(self._fl, self._header).parse()
             node.index = i
             nodes.append(node)
-            # print(
-            #     f"Node parsed: ",
-            #     i,
-            #     node.type.name,
-            #     node.name,
-            #     node.attribute_index,
-            #     node.material_data_ofs,
-            # )
-            # print(f"\t{self._attributes[node.attribute_index].}")
         return nodes
 
     def _setup_node_references(self, node: HSFNode):
@@ -748,11 +733,13 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             node.mesh_data.envelopes.append(
                 self._envelopes[node.mesh_data.cenv_index + i]
             )
-        import pprint
 
-        print(f"Envelopes for '{node.mesh_data.name}' ({node.index}):")
-        pprint.pprint(node.mesh_data.envelopes)
-        print("----")
+        if node.mesh_data.envelopes:
+            self._logger.info(f"Envelopes for '{node.mesh_data.name}' ({node.index}):")
+            for env in node.mesh_data.envelopes:
+                self._logger.info(
+                    f"\t- Single binds: {len(env.single_binds)}, double binds: {len(env.double_binds)}, multi binds: {len(env.multi_binds)}, copy count: {env.copy_count}, vertex count: {env.vertex_count}, name: {env.name}"
+                )
 
     def _verify_node_references(self, node: HSFNode):
         """Verifies that referenced indices are set up correctly. This is just a sanity check."""

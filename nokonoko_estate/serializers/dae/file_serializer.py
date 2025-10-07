@@ -17,9 +17,7 @@ from nokonoko_estate.formats.formats import (
     PrimitiveObject,
     Vertex,
 )
-from nokonoko_estate.formats.matrix import RotationMatrix, TransformationMatrix
-
-logger = logging.Logger(__name__)
+from nokonoko_estate.formats.matrix import TransformationMatrix
 
 ColladaTriangle = tuple[Vertex, Vertex, Vertex]
 ColladaPolygon = tuple[Vertex, Vertex, Vertex, Vertex]
@@ -34,6 +32,7 @@ class HSFFileDAESerializer:
     def __init__(self, data: HSFFile, output_filepath: str):
         self._data = data
         self.output_path = output_filepath
+        self._logger = logging.getLogger(self.__class__.__qualname__)
 
     def serialize(self):
         """Serialize the HSF-file (`self.data`) and output it to `self.output_filepath`"""
@@ -130,8 +129,6 @@ class HSFFileDAESerializer:
         ET.indent(root, space=" ", level=0)
         tree = ET.ElementTree(root)
         tree.write(self.output_path, encoding="utf-8", xml_declaration=True)
-        # b_xml = ET.tostring(root)
-        # print(b_xml.decode("utf-8"))
 
     def serialize_image(
         self, name: str, texture: Image.Image, index: int
@@ -276,8 +273,8 @@ class HSFFileDAESerializer:
         if not node.mesh_data.envelopes:
             return controller
         elif len(node.mesh_data.envelopes) > 1:
-            print(
-                f"WARN: for mesh {node.name}, multiple envelopes were encountered. Only the first will be used! Envelopes: \n{pprint.pformat(node.mesh_data.envelopes)}"
+            self._logger.warning(
+                f"For mesh {node.name}, multiple envelopes were encountered. Only the first will be used! Envelopes: \n{pprint.pformat(node.mesh_data.envelopes)}"
             )
 
         env = node.mesh_data.envelopes[0]
@@ -288,12 +285,12 @@ class HSFFileDAESerializer:
 
         if env.copy_count > 0:
             if env.single_binds or env.double_binds or env.multi_binds:
-                print(
-                    f"WARN: for mesh {node.name} ({node.index}), encountered an envelope with copy_count > 0 and binds: \n{pprint.pformat(env)}"
+                self._logger.warning(
+                    f"For mesh {node.name} ({node.index}), encountered an envelope with copy_count > 0 and binds: \n{pprint.pformat(env)}"
                 )
             if node.hierarchy_data.parent is None:
-                print(
-                    f"WARN: for mesh {node.name} ({node.index}), has copy_count > 0, but does not have a parent: \n{pprint.pformat(env)}"
+                self._logger.warning(
+                    f"for mesh {node.name} ({node.index}), has copy_count > 0, but does not have a parent: \n{pprint.pformat(env)}"
                 )
 
         # Parse weights for each vertex
@@ -371,11 +368,6 @@ class HSFFileDAESerializer:
         ET.SubElement(accessor, "param", name="JOINT", type="name")
 
         # Binds
-        if "itemhook" in node.name:
-            print(node)
-            bone = res_bones[0]
-            print((node.hierarchy_data.inverse_bind_matrix(bone)).round())
-
         source = self.serialize_vertex_data_array(
             [
                 (node.hierarchy_data.inverse_bind_matrix(bone).round()).as_raw()
@@ -430,8 +422,8 @@ class HSFFileDAESerializer:
         for i, pos_weights in enumerate(vertex_weights):
             weight_sum = sum(map(lambda x: x[1], pos_weights))
             if weight_sum not in (0, 1):
-                print(
-                    f"WARN: Weight sum in {node.name} ({node.index}) for position {i} is {weight_sum}. Should be 1.0"
+                self._logger.warning(
+                    f"Weight sum in {node.name} ({node.index}) for position {i} is {weight_sum}. Should be 1.0"
                 )
             vcount.append(str(len(pos_weights)))
             for bone_idx, w in pos_weights:
@@ -516,7 +508,7 @@ class HSFFileDAESerializer:
                 attribute_index = collada_set_idx[0]
                 for vertices in primitive_vertices:
                     if vertices[0].uv_index != -1:
-                        print(
+                        self._logger.warning(
                             f"WARN: Mesh {mesh_data.name} has no UV's. Attribute_index {attribute_index} contains a vertex with a uv-index ({vertices[0].uv_index}) defined! UV-index will be ignored!"
                         )
 
@@ -530,8 +522,8 @@ class HSFFileDAESerializer:
                 else:
                     has_prim_with_uvs = True
             if has_prim_with_uvs and has_prim_without_uvs:
-                print(
-                    f"WARN: Mesh {mesh_data.name} with Attribute_index {attribute_index} contains primitives with and without UV-indices."
+                self._logger.warning(
+                    f"Mesh {mesh_data.name} with Attribute_index {attribute_index} contains primitives with and without UV-indices."
                 )
 
         # TODO: Check if, within a single dictionary item, there are vertices with AND without uv-indices. These should never mix 'n match!
@@ -636,7 +628,7 @@ class HSFFileDAESerializer:
                 )
             )
         else:
-            print(f"WARN: Mesh {mesh_obj_uid} does NOT have normals defined!")
+            self._logger.warning(f"Mesh {mesh_obj_uid} does NOT have normals defined!")
         if include_uvs:
             offset += 1
             inputs.append(
@@ -835,8 +827,8 @@ class HSFFileDAESerializer:
                 case HSFNodeType.MESH:
                     pass
                 case _:
-                    print(
-                        f"WARN: Replica node {node.index} ({node.name}) attempts to copy over non-MESH child {child.index} ({child.name}; {child.type.name}) of replicated node {node.index} ({node.replica_data.replica.name})"
+                    self._logger.warning(
+                        f"Replica node {node.index} ({node.name}) attempts to copy over non-MESH child {child.index} ({child.name}; {child.type.name}) of replicated node {node.index} ({node.replica_data.replica.name})"
                     )
                     continue
             res.append(
