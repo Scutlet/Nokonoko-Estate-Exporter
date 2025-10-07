@@ -122,6 +122,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             self._textures,
             self._materials,
             self._attributes,
+            self._skeletons,
         )
 
     def parse(self) -> HSFFile:

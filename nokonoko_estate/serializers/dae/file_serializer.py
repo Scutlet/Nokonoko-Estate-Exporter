@@ -71,7 +71,8 @@ class HSFFileDAESerializer:
             filter(lambda node: node.type == HSFNodeType.MESH, self._data.nodes)
         ):
             geometries.append(self.serialize_geometry(node))
-            controllers.append(self.serialize_controller(node))
+            if node.mesh_data.envelopes:
+                controllers.append(self.serialize_controller(node))
 
         # Visual scenes
         visual_scenes = ET.SubElement(root, "library_visual_scenes")
@@ -79,25 +80,23 @@ class HSFFileDAESerializer:
             visual_scenes, "visual_scene", id="Scene", name="Scene"
         )
 
-        armature_root = ET.SubElement(
-            visual_scene, "node", id="Armature", name="Armature", type="NODE"
-        )
+        armature_root = ET.Element("node", id="Armature", name="Armature", type="NODE")
         collada_nodes: dict[int, ET.Element] = [None] * len(self._data.nodes)
         for node, _ in self._data.root_node.dfs():
             match node.type:
                 case HSFNodeType.MESH:
                     collada_nodes[node.index] = self.serialize_visual_scene_mesh(node)
-                    armature_root.append(collada_nodes[node.index])
-                    # if node.hierarchy_data.parent:
-                    #     collada_nodes[node.hierarchy_data.parent.index].append(
-                    #         collada_nodes[node.index]
-                    #     )
+                    if not self._data.skeletons:
+                        visual_scene.append(collada_nodes[node.index])
+                    else:
+                        armature_root.append(collada_nodes[node.index])
                 case HSFNodeType.REPLICA:
-                    # TODO
-                    pass
-                    # for e in self.serialize_visual_scene_replica(node):
-                    #     visual_scene.append(e)
+                    for e in self.serialize_visual_scene_replica(node):
+                        visual_scene.append(e)
                 case HSFNodeType.NULL1:
+                    if not self._data.skeletons:
+                        # Only serialize node as a bone if there's a skeleton
+                        continue
                     collada_nodes[node.index] = self.serialize_visual_scene_joint(node)
                     if node.hierarchy_data.parent:
                         collada_nodes[node.hierarchy_data.parent.index].append(
@@ -106,19 +105,10 @@ class HSFFileDAESerializer:
                 case _:
                     # For all other nodes, do nothing
                     continue
-        armature_root.append(collada_nodes[self._data.root_node.index])
 
-        # for i, node in enumerate(self._data.nodes):
-        #     # Add all meshes to the scene
-        #     match node.type:
-        #         case HSFNodeType.MESH:
-        #             visual_scene.append(self.serialize_visual_scene_mesh(node))
-        #         case HSFNodeType.REPLICA:
-        #             for e in self.serialize_visual_scene_replica(node):
-        #                 visual_scene.append(e)
-        #         case _:
-        #             # For all other nodes, do nothing
-        #             continue
+        if self._data.skeletons:
+            visual_scene.append(armature_root)
+            armature_root.append(collada_nodes[self._data.root_node.index])
 
         # Scene
         scene = ET.SubElement(root, "scene")
@@ -860,19 +850,27 @@ class HSFFileDAESerializer:
         if name is None:
             name = uid
         xml_node = ET.Element("node", id=name, name=name, type="NODE")
-        # matrix = ET.SubElement(xml_node, "matrix", sid="transform")
-        # A list of 16 floating-point values. These values are organized into a 4-by-4
-        #   column-order matrix suitable for matrix composition.
-        # trans_mtx = transform or node.hierarchy_data.world_transform()
-        # matrix.text = self._serialize_transformation_matrix(trans_mtx)
-        geo = ET.SubElement(
-            xml_node, "instance_controller", url=f"#Armature_{uid}-skin"  # , name=name
-        )
 
-        ET.SubElement(geo, "skeleton").text = (
-            f"#Armature_{self._data.root_node.name}__{self._data.root_node.index}"
-        )
-        bind_material = ET.SubElement(geo, "bind_material")
+        is_rigged = bool(node.mesh_data.envelopes)
+        inst_tag = "instance_controller" if is_rigged else "instance_geometry"
+        inst_url = f"#Armature_{uid}-skin" if is_rigged else f"#{uid}-mesh"
+        inst_name = None if is_rigged else name
+
+        if not is_rigged:
+            # A list of 16 floating-point values. These values are organized into a 4-by-4
+            #   column-order matrix suitable for matrix composition.
+            matrix = ET.SubElement(xml_node, "matrix", sid="transform")
+            trans_mtx = transform or node.hierarchy_data.world_transform()
+            matrix.text = self._serialize_transformation_matrix(trans_mtx)
+        instance = ET.SubElement(xml_node, inst_tag, url=inst_url)
+        if inst_name is not None:
+            instance.attrib["name"] = inst_name
+
+        if is_rigged:
+            ET.SubElement(instance, "skeleton").text = (
+                f"#Armature_{self._data.root_node.name}__{self._data.root_node.index}"
+            )
+        bind_material = ET.SubElement(instance, "bind_material")
         technique = ET.SubElement(bind_material, "technique_common")
 
         attribute_indices = set()

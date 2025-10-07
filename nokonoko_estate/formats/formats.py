@@ -39,6 +39,7 @@ class HSFFile:
     textures: list[tuple[str, Image.Image]] = field(default_factory=list)
     materials: list["MaterialObject"] = field(default_factory=list)
     attributes: list["AttributeObject"] = field(default_factory=list)
+    skeletons: list["SkeletonObject"] = field(default_factory=list)
     non_hierarchy_nodes: list["HSFNode"] = field(default_factory=list)
 
 
