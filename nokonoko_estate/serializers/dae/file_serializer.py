@@ -104,7 +104,11 @@ class HSFFileDAESerializer:
                         )
                 case _:
                     # For all other nodes, do nothing
-                    continue
+                    collada_nodes[node.index] = self.serialize_visual_scene_joint(node)
+                    if node.hierarchy_data.parent:
+                        collada_nodes[node.hierarchy_data.parent.index].append(
+                            collada_nodes[node.index]
+                        )
 
         if self._data.skeletons:
             visual_scene.append(armature_root)
@@ -904,7 +908,7 @@ class HSFFileDAESerializer:
         """
         Serialize a node of type "JOINT".
         """
-        assert node.type == HSFNodeType.NULL1
+        # assert node.type == HSFNodeType.NULL1
         uid = f"{node.name}__{node.index}"
         name = node.name
         xml_node = ET.Element(

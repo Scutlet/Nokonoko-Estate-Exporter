@@ -92,29 +92,31 @@ class HSFFileParser(HSFParserBase[HSFFile]):
             self._fl = ParserLogger(fl, sz)
             return self.parse()
 
-    def _output_file(self):
+    def _output_file(self) -> HSFFile:
         """TODO"""
-
-        # for i, node in enumerate(self._nodes):
-        #     if node.type == HSFNodeType.REPLICA:
-        #         print(
-        #             node.type.name,
-        #             i,
-        #             node,
-        #             node.hierarchy_data.symbol_index,
-        #         )
-        #         print("^-- FOUND REPLICA NODE --^")
-        #         # exit(-1)
-        # print("Didn't find replica...")
-        self._logger.info(f"Non-hierarchy nodes ({len(self._non_hierarchy_nodes)}):")
-        for node in self._non_hierarchy_nodes:
-            self._logger.info(f"| {node} > {node.light_data} {node.camera_data}")
-
-        self._logger.info("HSF hierarchy tree:")
-        for node, level in self._root_node.dfs():
+        if self._nodes:
+            # for i, node in enumerate(self._nodes):
+            #     if node.type == HSFNodeType.REPLICA:
+            #         print(
+            #             node.type.name,
+            #             i,
+            #             node,
+            #             node.hierarchy_data.symbol_index,
+            #         )
+            #         print("^-- FOUND REPLICA NODE --^")
+            #         # exit(-1)
+            # print("Didn't find replica...")
             self._logger.info(
-                f"|{'-' * 4 * level} {node} @ {node.hierarchy_data.base_transform.position}"
+                f"Non-hierarchy nodes ({len(self._non_hierarchy_nodes)}):"
             )
+            for node in self._non_hierarchy_nodes:
+                self._logger.info(f"| {node} > {node.light_data} {node.camera_data}")
+
+            self._logger.info("HSF hierarchy tree:")
+            for node, level in self._root_node.dfs():
+                self._logger.info(
+                    f"|{'-' * 4 * level} {node} @ {node.hierarchy_data.base_transform.position}"
+                )
 
         return HSFFile(
             self._root_node,
@@ -218,7 +220,7 @@ class HSFFileParser(HSFParserBase[HSFFile]):
 
         # Textures
         self._fl.seek(self._header.textures.offset, io.SEEK_SET)
-        self._logger.info(f"Identified {self._header.motions.length} texture(s)")
+        self._logger.info(f"Identified {self._header.textures.length} texture(s)")
         self._logger.info(f"Identified {self._header.palettes.length} palette(s)")
         self._parse_textures()
         return self._output_file()
@@ -747,6 +749,9 @@ class HSFFileParser(HSFParserBase[HSFFile]):
         if node.hierarchy_data:
             # If a node has a parent, the node a child of its parent
             if node.hierarchy_data.parent is not None:
+                assert (
+                    node.hierarchy_data.parent.hierarchy_data is not None
+                ), "Node has a parent, but that parent doesn't have hierarchy data!"
                 assert (
                     node in node.hierarchy_data.parent.hierarchy_data.children
                 ), "Node has a parent, but isn't a child of that parent"

@@ -41,26 +41,27 @@ if __name__ == "__main__":
     # with open(parse_logpath, "wb") as fl:
     #     fl.write(bytes([x.value for x in parser.get_parselog()]))
 
-    logger.info(
-        f"Exporting textures to {os.path.join(OUTPUT_FOLDER, basename, 'images')} ..."
-    )
-    textures: list[str] = []
-    for name, tex in data.textures:
-        # tex.show()
-        name = name.replace("/", "")
-        name = name.replace("\\", "")
-        output_fp = f"{os.path.join(OUTPUT_FOLDER, basename, 'images', name)}.png"
-        tex.save(output_fp)
-        logger.debug(f"\t - Exported texture to {output_fp}")
-        textures.append(f"{name}.png")
+    if data.textures:
+        logger.info(
+            f"Exporting textures to {os.path.join(OUTPUT_FOLDER, basename, 'images')} ..."
+        )
+        textures: list[str] = []
+        for name, tex in data.textures:
+            # tex.show()
+            name = name.replace("/", "")
+            name = name.replace("\\", "")
+            output_fp = f"{os.path.join(OUTPUT_FOLDER, basename, 'images', name)}.png"
+            tex.save(output_fp)
+            logger.debug(f"\t - Exported texture to {output_fp}")
+            textures.append(f"{name}.png")
 
-    logger.info(f"Exported {len(textures)} texture(s) > {', '.join(textures)}")
-    logger.info(
-        f"Exporting model to {os.path.join(OUTPUT_FOLDER, basename, basename)}.dae ..."
-    )
-    serializer = HSFFileDAESerializer(
-        data,
-        f"{os.path.join(OUTPUT_FOLDER, basename, basename)}.dae",
-    )
-    serializer.serialize()
+        logger.info(f"Exported {len(textures)} texture(s) > {', '.join(textures)}")
+        logger.info(
+            f"Exporting model to {os.path.join(OUTPUT_FOLDER, basename, basename)}.dae ..."
+        )
+        serializer = HSFFileDAESerializer(
+            data,
+            f"{os.path.join(OUTPUT_FOLDER, basename, basename)}.dae",
+        )
+        serializer.serialize()
     logger.info(f"Export complete!")

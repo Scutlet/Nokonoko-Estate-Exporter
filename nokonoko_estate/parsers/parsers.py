@@ -226,7 +226,14 @@ class HSFNodeParser(HSFParserBase[HSFNode]):
         node.const_data_ofs = self._parse_int()
         node.render_flags = self._parse_int()
 
-        if node.type in (HSFNodeType.NULL1, HSFNodeType.MESH, HSFNodeType.REPLICA):
+        if node.type in (
+            HSFNodeType.NULL1,
+            HSFNodeType.MESH,
+            HSFNodeType.REPLICA,
+            HSFNodeType.JOINT,
+            HSFNodeType.ROOT,
+            HSFNodeType.EFFECT,
+        ):
             h_parser = HSFHierarchyNodeDataParser(self._fl, self._header)
             node.hierarchy_data = h_parser.parse()
 
@@ -234,29 +241,25 @@ class HSFNodeParser(HSFParserBase[HSFNode]):
             case HSFNodeType.NULL1:
                 # The remainder of the data is junk data. This data was left over from the previous node
                 #   in the node list when the HSF-file was created. Skip over all this junk.
-                # m_parser = HSFMeshNodeDataParser(self._fl, self._header)
-                # node.mesh_data = m_parser.parse()
-                self._fl.seek(start + 0x144, io.SEEK_SET)
+                pass
             case HSFNodeType.MESH:
                 m_parser = HSFMeshNodeDataParser(self._fl, self._header)
                 node.mesh_data = m_parser.parse()
-            case HSFNodeType.REPLICA:
-                r_parser = HSFReplicaNodeDataParser(self._fl, self._header)
-                node.replica_data = r_parser.parse()
-                self._fl.seek(start + 0x144, io.SEEK_SET)
                 assert (
                     self._fl.tell() == start + 0x144
                 ), "Data reader is in the incorrect position!"
+            case HSFNodeType.REPLICA:
+                r_parser = HSFReplicaNodeDataParser(self._fl, self._header)
+                node.replica_data = r_parser.parse()
             case HSFNodeType.LIGHT:
                 r_parser = HSFLightNodeDataParser(self._fl, self._header)
                 node.light_data = r_parser.parse()
-                self._fl.seek(start + 0x144, io.SEEK_SET)
             case HSFNodeType.CAMERA:
                 r_parser = HSFCameraNodeDataParser(self._fl, self._header)
                 node.camera_data = r_parser.parse()
-                self._fl.seek(start + 0x144, io.SEEK_SET)
             case _:
-                raise ValueError(f"Cannot parse {node.type}-node: {node}")
+                self._logger.warning(f"Cannot parse {node.type}-node: {node}")
+        self._fl.seek(start + 0x144, io.SEEK_SET)
         return node
 
 
